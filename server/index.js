@@ -4,6 +4,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
+import ExcelJS from "exceljs";
 import { pool, initDb } from "./db.js";
 import { sendMail } from "./mailer.js";
 
@@ -203,16 +204,39 @@ app.get("/api/worklogs", auth, async (req, res) => {
 });
 
 app.post("/api/worklogs", auth, async (req, res) => {
-  const { data, inizio, fine, pausa, ore } = req.body;
+  const { data, inizio, fine, pausa, ore, straordinari } = req.body;
   try {
     const { rows } = await pool.query(
-      `INSERT INTO worklogs (user_id, data, inizio, fine, pausa, ore) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-      [req.user.id, data, inizio, fine, Number(pausa || 0), Number(ore)]
+      `INSERT INTO worklogs (user_id, data, inizio, fine, pausa, ore, straordinari)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [req.user.id, data, inizio, fine, Number(pausa || 0), Number(ore), Number(straordinari || 0)]
     );
     res.json(rows[0]);
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Errore nel salvataggio delle ore." });
+  }
+});
+
+// Modifica di una registrazione ore. L'utente può correggere le proprie;
+// l'admin può correggere quelle di chiunque (in caso di incongruenza).
+app.put("/api/worklogs/:id", auth, async (req, res) => {
+  const { data, inizio, fine, pausa, ore, straordinari } = req.body;
+  try {
+    const { rows } = await pool.query("SELECT * FROM worklogs WHERE id=$1", [req.params.id]);
+    const w = rows[0];
+    if (!w) return res.status(404).json({ error: "Registrazione non trovata." });
+    if (w.user_id !== req.user.id && req.user.role !== "admin")
+      return res.status(403).json({ error: "Non puoi modificare questa registrazione." });
+    const { rows: upd } = await pool.query(
+      `UPDATE worklogs SET data=$1, inizio=$2, fine=$3, pausa=$4, ore=$5, straordinari=$6
+       WHERE id=$7 RETURNING *`,
+      [data, inizio, fine, Number(pausa || 0), Number(ore), Number(straordinari || 0), req.params.id]
+    );
+    res.json(upd[0]);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Errore nella modifica delle ore." });
   }
 });
 
@@ -267,6 +291,94 @@ app.get("/api/users", auth, adminOnly, async (req, res) => {
     "SELECT id, name, email, role FROM users WHERE role='user' ORDER BY name"
   );
   res.json(rows);
+});
+
+// ============================================================
+//  EXPORT EXCEL (riepilogo mensile di tutti gli utenti, solo admin)
+// ============================================================
+function hoursBetween(a, b) {
+  if (!a || !b) return 0;
+  const [h1, m1] = a.split(":").map(Number), [h2, m2] = b.split(":").map(Number);
+  return ((h2 * 60 + m2) - (h1 * 60 + m1)) / 60;
+}
+function eachDayISO(start, end) {
+  const out = []; let d = new Date(String(start).slice(0,10)), e = new Date(String(end).slice(0,10));
+  while (d <= e) { out.push(d.toISOString().slice(0, 10)); d.setDate(d.getDate() + 1); }
+  return out;
+}
+
+app.get("/api/export", auth, adminOnly, async (req, res) => {
+  // parametri: ?year=2026&month=8  (month 1-12)
+  const year = Number(req.query.year) || new Date().getFullYear();
+  const month = Number(req.query.month) || (new Date().getMonth() + 1);
+  const inMonth = (v) => { const s = String(v).slice(0,10); return Number(s.slice(0,4)) === year && Number(s.slice(5,7)) === month; };
+
+  try {
+    const users = (await pool.query("SELECT id, name, email FROM users WHERE role='user' ORDER BY name")).rows;
+    const worklogs = (await pool.query("SELECT * FROM worklogs")).rows;
+    const requests = (await pool.query("SELECT * FROM requests WHERE stato='approvata'")).rows;
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "Gestione ore";
+    const ws = wb.addWorksheet(`${String(month).padStart(2,"0")}-${year}`);
+
+    ws.columns = [
+      { header: "Dipendente", key: "name", width: 26 },
+      { header: "Email", key: "email", width: 30 },
+      { header: "Ore lavorate", key: "ore", width: 14 },
+      { header: "Straordinari (h)", key: "straord", width: 16 },
+      { header: "Permessi (h)", key: "permessi", width: 14 },
+      { header: "Ferie (gg)", key: "ferie", width: 12 },
+      { header: "Assenze (gg)", key: "assenze", width: 13 },
+    ];
+    ws.getRow(1).font = { bold: true };
+    ws.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF3A7D6B" } };
+    ws.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
+
+    for (const u of users) {
+      const uLogs = worklogs.filter(w => w.user_id === u.id && inMonth(w.data));
+      const ore = uLogs.reduce((s, w) => s + Number(w.ore), 0);
+      const straord = uLogs.reduce((s, w) => s + Number(w.straordinari || 0), 0);
+
+      let permessi = 0, ferie = 0, assenze = 0;
+      requests.filter(r => r.user_id === u.id).forEach(r => {
+        const giorni = eachDayISO(r.data_inizio, r.data_fine).filter(inMonth);
+        if (r.tipo === "permesso") {
+          if (r.mode === "ore" && inMonth(r.data_inizio)) permessi += hoursBetween(r.ora_inizio, r.ora_fine);
+          else permessi += giorni.length * 8;
+        } else if (r.tipo === "ferie") ferie += giorni.length;
+        else if (r.tipo === "assenza") assenze += giorni.length;
+      });
+
+      ws.addRow({
+        name: u.name, email: u.email,
+        ore: Math.round(ore * 100) / 100,
+        straord: Math.round(straord * 100) / 100,
+        permessi: Math.round(permessi * 100) / 100,
+        ferie, assenze,
+      });
+    }
+
+    // riga totali
+    const last = users.length + 2;
+    const totalRow = ws.addRow({
+      name: "TOTALE", email: "",
+      ore: { formula: `SUM(C2:C${last-1})` },
+      straord: { formula: `SUM(D2:D${last-1})` },
+      permessi: { formula: `SUM(E2:E${last-1})` },
+      ferie: { formula: `SUM(F2:F${last-1})` },
+      assenze: { formula: `SUM(G2:G${last-1})` },
+    });
+    totalRow.font = { bold: true };
+
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="riepilogo_${year}_${String(month).padStart(2,"0")}.xlsx"`);
+    await wb.xlsx.write(res);
+    res.end();
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Errore nella generazione del file Excel." });
+  }
 });
 
 // ============================================================
