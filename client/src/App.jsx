@@ -36,6 +36,10 @@ function describeReq(r){
   return iso(r.data_inizio)===iso(r.data_fine) ? `${fmtDate(r.data_inizio)} (1 giorno)` : `${fmtDate(r.data_inizio)} → ${fmtDate(r.data_fine)} (${days} giorni)`;
 }
 function buildMailto(email, subject, body){ return `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`; }
+// Link per comporre l'email direttamente in Gmail web (utile per chi non ha un client di posta configurato).
+function buildGmail(email, subject, body){
+  return `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(email)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+}
 
 // ============================================================
 //  APP
@@ -124,6 +128,9 @@ function UserApp({ me, onLogout }) {
   const [logs, setLogs] = useState([]);
   const [detected, setDetected] = useState([]);
   const [msgs, setMsgs] = useState([]);
+  const [openReq, setOpenReq] = useState(null); // richiesta da aprire in modifica dal calendario
+
+  const openRequestFromCalendar = (r) => { setOpenReq(r); setTab("richieste"); };
 
   const reload = useCallback(async () => {
     const [r, l, d, m] = await Promise.all([
@@ -148,8 +155,8 @@ function UserApp({ me, onLogout }) {
           Comunicazioni{unread>0 && <span className="badge">{unread}</span>}</button>
       </nav>
       <main className="main">
-        {tab==="calendario" && <UserCalendar cursor={cursor} setCursor={setCursor} reqs={reqs} logs={logs} />}
-        {tab==="richieste" && <UserRequests me={me} reqs={reqs} reload={reload} />}
+        {tab==="calendario" && <UserCalendar cursor={cursor} setCursor={setCursor} reqs={reqs} logs={logs} onOpenRequest={openRequestFromCalendar} />}
+        {tab==="richieste" && <UserRequests me={me} reqs={reqs} reload={reload} openReq={openReq} clearOpenReq={()=>setOpenReq(null)} />}
         {tab==="ore" && <UserWorklogs logs={logs} detected={detected} reload={reload} />}
         {tab==="riepilogo" && <MonthlySummary reqs={reqs} logs={logs} detected={detected} cursor={cursor} setCursor={setCursor} showCompare />}
         {tab==="messaggi" && <Messages msgs={msgs} me={me} reload={reload} />}
@@ -159,29 +166,51 @@ function UserApp({ me, onLogout }) {
   );
 }
 
-function UserCalendar({ cursor, setCursor, reqs, logs }) {
+function UserCalendar({ cursor, setCursor, reqs, logs, onOpenRequest }) {
   const events = useMemo(()=>buildEventMap(reqs, logs), [reqs, logs]);
+  const [dayDetail, setDayDetail] = useState(null);
+  // richieste che toccano un dato giorno
+  const reqsOnDay = (day) => reqs.filter(r => r.stato!=="respinta" && eachDay(r.data_inizio,r.data_fine).includes(day));
+
   return (
     <div className="card">
       <MonthNav cursor={cursor} setCursor={setCursor} />
-      <CalendarGrid cursor={cursor} render={(day)=>{
+      <CalendarGrid cursor={cursor} onDayClick={(day)=>{ if(events[day]) setDayDetail(day); }} render={(day)=>{
         const ev = events[day]; if (!ev) return null;
         return <div className="daytags">{ev.map((e,i)=>(
           <span key={i} className="daytag" style={{background:e.bg,color:e.color}} title={e.title}>{e.short}{e.hours?` ${e.hours}h`:""}</span>
         ))}</div>;
       }} />
       <Legend />
+      {dayDetail && (
+        <Modal onClose={()=>setDayDetail(null)} title={`Giorno ${fmtDate(dayDetail)}`}>
+          {reqsOnDay(dayDetail).length===0 && <div className="muted small">Nessuna richiesta in questo giorno (solo ore lavorate).</div>}
+          <div className="list">
+            {reqsOnDay(dayDetail).map(r=>(
+              <div key={r.id} className="reqrow">
+                <span className="pill" style={{background:TIPI[r.tipo].bg,color:TIPI[r.tipo].color}}>{TIPI[r.tipo].label}</span>
+                <div className="reqmain"><div className="reqtitle">{describeReq(r)}</div>{r.note && <div className="muted small">{r.note}</div>}</div>
+                <span className="pill" style={{background:STATI[r.stato].bg,color:STATI[r.stato].color}}>{STATI[r.stato].label}</span>
+                {canEdit(r) && <button className="btn tiny" onClick={()=>{ setDayDetail(null); onOpenRequest(r); }}>Modifica</button>}
+              </div>
+            ))}
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
 
-function UserRequests({ me, reqs, reload }) {
+function UserRequests({ me, reqs, reload, openReq, clearOpenReq }) {
   const [form, setForm] = useState(null);
   const [err, setErr] = useState("");
   const empty = { tipo:"permesso", mode:"ore", dataInizio:todayISO(), dataFine:todayISO(), oraInizio:"09:00", oraFine:"13:00", note:"" };
 
   const openNew = () => { setErr(""); setForm({ ...empty, id:null }); };
   const openEdit = (r) => { setErr(""); setForm({ id:r.id, tipo:r.tipo, mode:r.mode, dataInizio:iso(r.data_inizio), dataFine:iso(r.data_fine), oraInizio:r.ora_inizio||"09:00", oraFine:r.ora_fine||"13:00", note:r.note||"" }); };
+
+  // se arrivo dal calendario con una richiesta da modificare, apro il form
+  useEffect(() => { if (openReq) { openEdit(openReq); clearOpenReq(); } }, [openReq]);
 
   const save = async () => {
     setErr("");
@@ -247,19 +276,25 @@ function UserRequests({ me, reqs, reload }) {
 }
 
 function UserWorklogs({ logs, detected, reload }) {
-  const [d, setD] = useState(todayISO());
-  const [inizio, setInizio] = useState("09:00");
-  const [fine, setFine] = useState("18:00");
-  const [pausa, setPausa] = useState("60");
+  const empty = { id:null, data:todayISO(), inizio:"09:00", fine:"18:00", pausa:"60", straordinari:"0" };
+  const [f, setF] = useState(empty);
   const [err, setErr] = useState("");
 
-  const add = async () => {
+  const editing = f.id !== null;
+  const startEdit = (l) => { setErr(""); setF({ id:l.id, data:iso(l.data), inizio:l.inizio, fine:l.fine, pausa:String(l.pausa), straordinari:String(l.straordinari||0) }); };
+  const cancel = () => { setErr(""); setF(empty); };
+
+  const save = async () => {
     setErr("");
-    if (fine<=inizio) return setErr("L'orario di fine deve essere dopo l'inizio.");
-    const ore = hoursBetween(inizio, fine) - (parseInt(pausa||"0",10)/60);
+    if (f.fine<=f.inizio) return setErr("L'orario di fine deve essere dopo l'inizio.");
+    const ore = hoursBetween(f.inizio, f.fine) - (parseInt(f.pausa||"0",10)/60);
     if (ore<=0) return setErr("La pausa è più lunga del turno.");
-    try { await api.post("/api/worklogs", { data:d, inizio, fine, pausa:parseInt(pausa||"0",10), ore:round2(ore) }); reload(); }
-    catch(e){ setErr(e.message); }
+    const payload = { data:f.data, inizio:f.inizio, fine:f.fine, pausa:parseInt(f.pausa||"0",10), ore:round2(ore), straordinari:round2(parseFloat(f.straordinari||"0")) };
+    try {
+      if (editing) await api.put(`/api/worklogs/${f.id}`, payload);
+      else await api.post("/api/worklogs", payload);
+      cancel(); reload();
+    } catch(e){ setErr(e.message); }
   };
   const remove = async (l) => { if(!confirm("Eliminare questa registrazione?"))return; await api.del(`/api/worklogs/${l.id}`); reload(); };
 
@@ -267,32 +302,41 @@ function UserWorklogs({ logs, detected, reload }) {
     <div className="stack">
       <h2>Ore lavorate</h2>
       <div className="card formcard">
-        <div className="grid4">
-          <label className="field"><span>Data</span><input type="date" value={d} onChange={e=>setD(e.target.value)} /></label>
-          <label className="field"><span>Entrata</span><input type="time" value={inizio} onChange={e=>setInizio(e.target.value)} /></label>
-          <label className="field"><span>Uscita</span><input type="time" value={fine} onChange={e=>setFine(e.target.value)} /></label>
-          <label className="field"><span>Pausa (min)</span><input type="number" min="0" step="15" value={pausa} onChange={e=>setPausa(e.target.value)} /></label>
+        {editing && <div className="editbanner">Stai modificando la registrazione del {fmtDate(f.data)}</div>}
+        <div className="grid5">
+          <label className="field"><span>Data</span><input type="date" value={f.data} onChange={e=>setF({...f,data:e.target.value})} /></label>
+          <label className="field"><span>Entrata</span><input type="time" value={f.inizio} onChange={e=>setF({...f,inizio:e.target.value})} /></label>
+          <label className="field"><span>Uscita</span><input type="time" value={f.fine} onChange={e=>setF({...f,fine:e.target.value})} /></label>
+          <label className="field"><span>Pausa (min)</span><input type="number" min="0" step="15" value={f.pausa} onChange={e=>setF({...f,pausa:e.target.value})} /></label>
+          <label className="field"><span>Straordinari (h)</span><input type="number" min="0" step="0.25" value={f.straordinari} onChange={e=>setF({...f,straordinari:e.target.value})} /></label>
         </div>
         {err && <div className="alert">{err}</div>}
-        <div className="rowend"><button className="btn primary" onClick={add}>Registra ore</button></div>
+        <div className="rowend">
+          {editing && <button className="btn ghost" onClick={cancel}>Annulla</button>}
+          <button className="btn primary" onClick={save}>{editing?"Salva modifiche":"Registra ore"}</button>
+        </div>
       </div>
       {logs.length===0 && <div className="empty">Nessuna giornata registrata.</div>}
       <div className="list">
         {logs.map(l=>{
           const det = detected.find(x=>iso(x.data)===iso(l.data));
           const diff = det ? round2(Number(l.ore)-Number(det.ore)) : null;
+          const straord = Number(l.straordinari||0);
           return (
             <div key={l.id} className="logrow">
               <div className="logdate">{fmtDate(l.data)}</div>
               <div className="logtimes">{l.inizio}–{l.fine} · pausa {l.pausa}′</div>
-              <div className="loghours">{round2(Number(l.ore))}h <span className="muted small">dichiarate</span></div>
+              <div className="loghours">{round2(Number(l.ore))}h {straord>0 && <span className="straordtag">+{straord}h str.</span>}</div>
               <div className="logcompare">{det ? <span className={diff===0?"cmp ok":"cmp warn"}>Rilevate {round2(Number(det.ore))}h {diff!==0&&`(Δ ${diff>0?"+":""}${diff}h)`}</span> : <span className="muted small">nessun rilevamento</span>}</div>
-              <button className="btn tiny danger" onClick={()=>remove(l)}>Elimina</button>
+              <div className="logactions">
+                <button className="btn tiny" onClick={()=>startEdit(l)}>Modifica</button>
+                <button className="btn tiny danger" onClick={()=>remove(l)}>Elimina</button>
+              </div>
             </div>
           );
         })}
       </div>
-      <p className="muted small">Le ore “rilevate” vengono inserite dall'amministratore e confrontate con le tue.</p>
+      <p className="muted small">Le ore non richiedono approvazione: se noti un'incongruenza puoi correggerle con “Modifica”. Le ore “rilevate” le inserisce l'amministratore.</p>
     </div>
   );
 }
@@ -325,10 +369,10 @@ function AdminApp({ me, onLogout }) {
       const res = await api.post(`/api/requests/${r.id}/decide`, { stato });
       reload();
       if (stato==="approvata" && !res.emailSent) {
-        // apri mailto come fallback per l'admin
+        // apri Gmail web come fallback per l'admin (funziona senza client di posta installato)
         const subject = `Esito richiesta ${TIPI[r.tipo].label}`;
         const body = `Ciao ${r.user_name}, la tua richiesta di ${TIPI[r.tipo].label.toLowerCase()} del ${fmtDate(r.data_inizio)} è stata APPROVATA.`;
-        window.open(buildMailto(r.user_email, subject, body), "_blank");
+        window.open(buildGmail(r.user_email, subject, body), "_blank");
       }
     } catch(e){ alert(e.message); }
   };
@@ -379,24 +423,50 @@ function AdminRequests({ pending, allReqs, decide }) {
 }
 
 function TeamCalendar({ reqs, cursor, setCursor }) {
+  const [dayDetail, setDayDetail] = useState(null); // { day, list }
   const active = reqs.filter(r=>r.stato!=="respinta");
   const byDay = useMemo(()=>{ const m={}; active.forEach(r=>{ eachDay(r.data_inizio,r.data_fine).forEach(day=>{ (m[day] ||= []).push(r); }); }); return m; }, [active]);
+  const [exporting, setExporting] = useState(false);
+  const doExport = async () => {
+    setExporting(true);
+    const y = cursor.getFullYear(), mo = cursor.getMonth()+1;
+    try { await api.download(`/api/export?year=${y}&month=${mo}`, `riepilogo_${y}_${String(mo).padStart(2,"0")}.xlsx`); }
+    catch(e){ alert(e.message); }
+    finally { setExporting(false); }
+  };
+
   return (
     <div className="card">
-      <h2>Calendario del team</h2>
-      <p className="muted small">Ogni giorno mostra chi è in permesso / ferie / assenza. I giorni con più persone segnalano possibili sovrapposizioni.</p>
+      <div className="rowbetween">
+        <h2>Calendario del team</h2>
+        <button className="btn primary" onClick={doExport} disabled={exporting}>{exporting?"Genero…":"⭳ Esporta mese in Excel"}</button>
+      </div>
+      <p className="muted small">Ogni giorno mostra chi è in permesso / ferie / assenza. Clicca un giorno per vederne il dettaglio. L'export genera il riepilogo di <b>tutti</b> gli utenti per il mese mostrato qui sotto.</p>
       <MonthNav cursor={cursor} setCursor={setCursor} />
-      <CalendarGrid cursor={cursor} render={(day)=>{
+      <CalendarGrid cursor={cursor} onDayClick={(day)=>{ if(byDay[day]) setDayDetail({ day, list:byDay[day] }); }} render={(day)=>{
         const list = byDay[day]; if (!list) return null;
         const many = list.length>=2;
         return (
           <div className={many?"teamday many":"teamday"}>
-            {list.slice(0,3).map((r,i)=>(<span key={i} className="teamtag" style={{background:TIPI[r.tipo].bg,color:TIPI[r.tipo].color}}>{initials(r.user_name)} {TIPI[r.tipo].short}</span>))}
+            {list.slice(0,3).map((r,i)=>(<span key={i} className="teamtag" style={{background:TIPI[r.tipo].bg,color:TIPI[r.tipo].color}}>{firstName(r.user_name)} · {TIPI[r.tipo].short}</span>))}
             {list.length>3 && <span className="teamtag more">+{list.length-3}</span>}
           </div>
         );
       }} />
       <Legend />
+      {dayDetail && (
+        <Modal onClose={()=>setDayDetail(null)} title={`Giorno ${fmtDate(dayDetail.day)}`}>
+          <div className="list">
+            {dayDetail.list.map(r=>(
+              <div key={r.id} className="reqrow">
+                <span className="pill" style={{background:TIPI[r.tipo].bg,color:TIPI[r.tipo].color}}>{TIPI[r.tipo].label}</span>
+                <div className="reqmain"><div className="reqtitle">{r.user_name}</div><div className="muted small">{describeReq(r)}{r.note?` · ${r.note}`:""}</div></div>
+                <span className="pill" style={{background:STATI[r.stato].bg,color:STATI[r.stato].color}}>{STATI[r.stato].label}</span>
+              </div>
+            ))}
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -513,7 +583,7 @@ function MonthNav({ cursor, setCursor }) {
   const go = (delta) => { const c = new Date(cursor); c.setMonth(c.getMonth()+delta); setCursor(c); };
   return (<div className="monthnav"><button className="btn ghost tiny" onClick={()=>go(-1)}>‹</button><span className="monthlabel">{MESI[cursor.getMonth()]} {cursor.getFullYear()}</span><button className="btn ghost tiny" onClick={()=>go(1)}>›</button></div>);
 }
-function CalendarGrid({ cursor, render }) {
+function CalendarGrid({ cursor, render, onDayClick }) {
   const y=cursor.getFullYear(), m=cursor.getMonth();
   const startDow=(new Date(y,m,1).getDay()+6)%7;
   const days=new Date(y,m+1,0).getDate();
@@ -525,8 +595,22 @@ function CalendarGrid({ cursor, render }) {
         if(d===null) return <div key={i} className="calcell empty" />;
         const day=`${y}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
         const today=day===todayISO();
-        return <div key={i} className={today?"calcell today":"calcell"}><span className="calnum">{d}</span>{render(day)}</div>;
+        const clickable = !!onDayClick;
+        return <div key={i} className={`calcell${today?" today":""}${clickable?" clickable":""}`} onClick={clickable?()=>onDayClick(day):undefined}><span className="calnum">{d}</span>{render(day)}</div>;
       })}</div>
+    </div>
+  );
+}
+
+function firstName(name){ return (name||"").split(" ")[0]; }
+
+function Modal({ title, children, onClose }) {
+  return (
+    <div className="modalback" onClick={onClose}>
+      <div className="modal" onClick={e=>e.stopPropagation()}>
+        <div className="modalhead"><h3>{title}</h3><button className="btn ghost tiny" onClick={onClose}>✕</button></div>
+        {children}
+      </div>
     </div>
   );
 }
@@ -537,6 +621,7 @@ function MonthlySummary({ reqs, logs, detected, cursor, setCursor, showCompare }
   const y=cursor.getFullYear(), m=cursor.getMonth();
   const inMonth=(v)=>{ const s=iso(v); return s && Number(s.slice(0,4))===y && Number(s.slice(5,7))===m+1; };
   const oreLav=logs.filter(l=>inMonth(l.data)).reduce((s,l)=>s+Number(l.ore),0);
+  const oreStr=logs.filter(l=>inMonth(l.data)).reduce((s,l)=>s+Number(l.straordinari||0),0);
   const oreRil=(detected||[]).filter(x=>inMonth(x.data)).reduce((s,x)=>s+Number(x.ore),0);
   let oreP=0, gF=0, gA=0;
   reqs.filter(r=>r.stato==="approvata").forEach(r=>{
@@ -548,8 +633,9 @@ function MonthlySummary({ reqs, logs, detected, cursor, setCursor, showCompare }
   return (
     <div className="card">
       <MonthNav cursor={cursor} setCursor={setCursor} />
-      <div className="stats">
+      <div className="stats stats5">
         <Stat label="Ore lavorate" value={`${round2(oreLav)}h`} color={TIPI.lavoro.color} />
+        <Stat label="Straordinari" value={`${round2(oreStr)}h`} color="#b3701c" />
         <Stat label="Permessi" value={`${round2(oreP)}h`} color={TIPI.permesso.color} />
         <Stat label="Ferie" value={`${gF}g`} color={TIPI.ferie.color} />
         <Stat label="Assenze" value={`${gA}g`} color={TIPI.assenza.color} />
@@ -575,7 +661,10 @@ function Messages({ msgs, me, reload }) {
         <div key={m.id} className={m.read?"msgrow":"msgrow unreadrow"} onClick={()=>markRead(m)}>
           <div className="msgmain"><div className="reqtitle">{m.subject} {!m.read && <span className="dot" />}</div><div className="muted small">{m.body}</div></div>
           <div className="msgside"><span className="muted small">{fmtDate(m.created_at)}</span>
-            <a className="btn tiny" href={buildMailto(me.email, m.subject, m.body)} onClick={e=>e.stopPropagation()}>Apri email</a></div>
+            <div className="mailbtns" onClick={e=>e.stopPropagation()}>
+              <a className="btn tiny" href={buildGmail(me.email, m.subject, m.body)} target="_blank" rel="noreferrer">Gmail</a>
+              <a className="btn tiny ghost" href={buildMailto(me.email, m.subject, m.body)}>Altro</a>
+            </div></div>
         </div>
       ))}</div>
       <p className="muted small">Le conferme arrivano qui in tempo reale. Se l'invio email è configurato, ricevi anche una mail.</p>
@@ -694,6 +783,7 @@ h3{ font-size:16px; margin:0 0 10px; }
 .legenditem{ display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--muted); font-weight:600; }
 .legdot{ width:10px; height:10px; border-radius:3px; }
 .stats{ display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-top:4px; }
+.stats5{ grid-template-columns:repeat(5,1fr); }
 .stat{ background:var(--bg); border-radius:12px; padding:16px 12px; text-align:center; }
 .statval{ font-size:24px; font-weight:800; letter-spacing:-.02em; }
 .statlabel{ font-size:12.5px; color:var(--muted); font-weight:600; margin-top:4px; }
@@ -709,6 +799,17 @@ h3{ font-size:16px; margin:0 0 10px; }
 .msgside{ display:flex; flex-direction:column; align-items:flex-end; gap:6px; }
 .dot{ display:inline-block; width:8px; height:8px; border-radius:50%; background:#d9534f; margin-left:4px; }
 .hidemobile{ display:inline; }
-@media (max-width:640px){ .grid3,.grid4{ grid-template-columns:1fr 1fr; } .stats{ grid-template-columns:1fr 1fr; } .hidemobile{ display:none; } .calcell{ min-height:60px; } .main{ padding:16px 12px 50px; } .reqactions{ width:100%; margin-left:0; } .logcompare{ margin-left:0; width:100%; } }
-@media (max-width:420px){ .grid2,.grid3,.grid4{ grid-template-columns:1fr; } }
+.grid5{ display:grid; grid-template-columns:repeat(5,1fr); gap:12px; }
+.straordtag{ font-size:11px; font-weight:700; color:#b3701c; background:#f7ecd9; padding:2px 7px; border-radius:20px; margin-left:6px; }
+.editbanner{ background:#e0ebf4; color:#2b5f8a; padding:8px 12px; border-radius:9px; font-size:13px; font-weight:600; margin-bottom:12px; }
+.logactions{ display:flex; gap:6px; }
+.calcell.clickable{ cursor:pointer; }
+.calcell.clickable:hover{ background:#eef6f2; }
+.mailbtns{ display:flex; gap:6px; }
+.modalback{ position:fixed; inset:0; background:rgba(20,25,22,.45); display:flex; align-items:center; justify-content:center; padding:20px; z-index:50; }
+.modal{ background:var(--panel); border-radius:16px; box-shadow:0 12px 40px rgba(0,0,0,.25); padding:20px; width:100%; max-width:520px; max-height:80vh; overflow:auto; }
+.modalhead{ display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; }
+.modalhead h3{ margin:0; }
+@media (max-width:640px){ .grid3,.grid4,.grid5{ grid-template-columns:1fr 1fr; } .stats,.stats5{ grid-template-columns:1fr 1fr; } .hidemobile{ display:none; } .calcell{ min-height:60px; } .main{ padding:16px 12px 50px; } .reqactions{ width:100%; margin-left:0; } .logcompare{ margin-left:0; width:100%; } }
+@media (max-width:420px){ .grid2,.grid3,.grid4,.grid5{ grid-template-columns:1fr; } }
 `;
