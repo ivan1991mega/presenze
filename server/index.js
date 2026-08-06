@@ -296,13 +296,22 @@ app.get("/api/users", auth, adminOnly, async (req, res) => {
 // ============================================================
 //  EXPORT EXCEL (riepilogo mensile di tutti gli utenti, solo admin)
 // ============================================================
+// Converte in "YYYY-MM-DD" sia le stringhe sia gli oggetti Date restituiti da Postgres.
+function toISO(v) {
+  if (!v) return "";
+  if (v instanceof Date) {
+    const y = v.getFullYear(), m = String(v.getMonth() + 1).padStart(2, "0"), d = String(v.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+  return String(v).slice(0, 10);
+}
 function hoursBetween(a, b) {
   if (!a || !b) return 0;
   const [h1, m1] = a.split(":").map(Number), [h2, m2] = b.split(":").map(Number);
   return ((h2 * 60 + m2) - (h1 * 60 + m1)) / 60;
 }
 function eachDayISO(start, end) {
-  const out = []; let d = new Date(String(start).slice(0,10)), e = new Date(String(end).slice(0,10));
+  const out = []; let d = new Date(toISO(start)), e = new Date(toISO(end));
   while (d <= e) { out.push(d.toISOString().slice(0, 10)); d.setDate(d.getDate() + 1); }
   return out;
 }
@@ -311,7 +320,7 @@ app.get("/api/export", auth, adminOnly, async (req, res) => {
   // parametri: ?year=2026&month=8  (month 1-12)
   const year = Number(req.query.year) || new Date().getFullYear();
   const month = Number(req.query.month) || (new Date().getMonth() + 1);
-  const inMonth = (v) => { const s = String(v).slice(0,10); return Number(s.slice(0,4)) === year && Number(s.slice(5,7)) === month; };
+  const inMonth = (v) => { const s = toISO(v); return Number(s.slice(0,4)) === year && Number(s.slice(5,7)) === month; };
 
   try {
     const users = (await pool.query("SELECT id, name, email FROM users WHERE role='user' ORDER BY name")).rows;
