@@ -45,6 +45,7 @@ export async function initDb() {
       fine     TEXT NOT NULL,
       pausa    INTEGER DEFAULT 0,
       ore      NUMERIC(5,2) NOT NULL,
+      straordinari NUMERIC(5,2) DEFAULT 0,
       created_at TIMESTAMPTZ DEFAULT now()
     );
 
@@ -66,6 +67,9 @@ export async function initDb() {
       created_at TIMESTAMPTZ DEFAULT now()
     );
   `);
+
+  // Migrazione: aggiunge la colonna straordinari se il database è di una versione precedente.
+  await pool.query(`ALTER TABLE worklogs ADD COLUMN IF NOT EXISTS straordinari NUMERIC(5,2) DEFAULT 0;`);
 
   // Seed admin se il database è vuoto.
   const { rows } = await pool.query("SELECT COUNT(*)::int AS n FROM users");
