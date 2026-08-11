@@ -66,6 +66,15 @@ export async function initDb() {
       read       BOOLEAN DEFAULT false,
       created_at TIMESTAMPTZ DEFAULT now()
     );
+
+    -- Timbratura in corso: una sessione attiva per utente.
+    CREATE TABLE IF NOT EXISTS punch (
+      user_id       INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      entrata       TIMESTAMPTZ NOT NULL,        -- momento dell'entrata
+      stato         TEXT NOT NULL DEFAULT 'attivo', -- attivo | in_pausa
+      pausa_totale  INTEGER DEFAULT 0,           -- minuti di pausa già accumulati
+      pausa_inizio  TIMESTAMPTZ                  -- se in pausa, quando è iniziata
+    );
   `);
 
   // Migrazione: aggiunge la colonna straordinari se il database è di una versione precedente.
