@@ -699,6 +699,8 @@ function AdminDetected({ users, logs, detected, reload }) {
   const [d, setD] = useState(todayISO());
   const [ore, setOre] = useState("8");
   const [err, setErr] = useState("");
+  const [filtro, setFiltro] = useState("");      // filtra la lista per utente ("" = tutti)
+  const [aperti, setAperti] = useState({});      // quali gruppi sono espansi
   useEffect(()=>{ if(!userId && users[0]) setUserId(users[0].id); }, [users, userId]);
 
   const add = async () => {
@@ -710,7 +712,17 @@ function AdminDetected({ users, logs, detected, reload }) {
     catch(e){ setErr(e.message); }
   };
   const remove = async (x) => { await api.del(`/api/detected/${x.id}`); reload(); };
-  const uName = (id)=>users.find(u=>u.id===id)?.name || "—";
+  const toggle = (id) => setAperti(a => ({ ...a, [id]: !a[id] }));
+
+  // raggruppo le rilevazioni per utente
+  const gruppi = useMemo(() => {
+    const map = {};
+    detected.forEach(x => { (map[x.user_id] ||= []).push(x); });
+    Object.values(map).forEach(list => list.sort((a,b)=> iso(a.data)<iso(b.data)?1:-1));
+    return map;
+  }, [detected]);
+
+  const utentiDaMostrare = users.filter(u => (!filtro || u.id===Number(filtro)) && gruppi[u.id]);
 
   return (
     <div className="stack">
@@ -725,22 +737,51 @@ function AdminDetected({ users, logs, detected, reload }) {
         {err && <div className="alert">{err}</div>}
         <div className="rowend"><button className="btn primary" onClick={add}>Salva rilevazione</button></div>
       </div>
-      <div className="list">
-        {detected.map(x=>{
-          const log = logs.find(w=>w.user_id===x.user_id && iso(w.data)===iso(x.data));
-          const diff = log ? round2(Number(log.ore)-Number(x.ore)) : null;
-          return (
-            <div key={x.id} className="logrow">
-              <div className="logdate">{uName(x.user_id)}</div>
-              <div className="logtimes">{fmtDate(x.data)}</div>
-              <div className="loghours">{round2(Number(x.ore))}h <span className="muted small">rilevate</span></div>
-              <div className="logcompare">{log ? <span className={diff===0?"cmp ok":"cmp warn"}>Dichiarate {round2(Number(log.ore))}h {diff!==0&&`(Δ ${diff>0?"+":""}${diff}h)`}</span> : <span className="muted small">nessuna dichiarazione</span>}</div>
-              <button className="btn tiny danger" onClick={()=>remove(x)}>Elimina</button>
-            </div>
-          );
-        })}
-        {detected.length===0 && <div className="empty">Nessuna rilevazione inserita.</div>}
+
+      <div className="rowbetween">
+        <h3>Rilevazioni registrate</h3>
+        <label className="field inlinefilter"><span>Mostra</span>
+          <select value={filtro} onChange={e=>setFiltro(e.target.value)}>
+            <option value="">Tutti gli utenti</option>
+            {users.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}
+          </select>
+        </label>
       </div>
+
+      {utentiDaMostrare.length===0 && <div className="empty">Nessuna rilevazione inserita.</div>}
+
+      {utentiDaMostrare.map(u => {
+        const list = gruppi[u.id];
+        const aperto = aperti[u.id] || filtro; // se filtri un utente, aprilo di default
+        const totale = round2(list.reduce((s,x)=>s+Number(x.ore),0));
+        return (
+          <div key={u.id} className="usergroup">
+            <button className="grouphead" onClick={()=>toggle(u.id)}>
+              <div className="grouptitle">
+                <div className="avatar">{initials(u.name)}</div>
+                <div><div className="reqtitle">{u.name}</div><div className="muted small">{list.length} registrazioni · {totale}h totali</div></div>
+              </div>
+              <span className="chevron">{aperto ? "▾" : "▸"}</span>
+            </button>
+            {aperto && (
+              <div className="list groupbody">
+                {list.map(x=>{
+                  const log = logs.find(w=>w.user_id===x.user_id && iso(w.data)===iso(x.data));
+                  const diff = log ? round2(Number(log.ore)-Number(x.ore)) : null;
+                  return (
+                    <div key={x.id} className="logrow">
+                      <div className="logdate">{fmtDate(x.data)}</div>
+                      <div className="loghours">{round2(Number(x.ore))}h <span className="muted small">rilevate</span></div>
+                      <div className="logcompare">{log ? <span className={diff===0?"cmp ok":"cmp warn"}>Dichiarate {round2(Number(log.ore))}h {diff!==0&&`(Δ ${diff>0?"+":""}${diff}h)`}</span> : <span className="muted small">nessuna dichiarazione</span>}</div>
+                      <button className="btn tiny danger" onClick={()=>remove(x)}>Elimina</button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -1020,6 +1061,14 @@ h3{ font-size:16px; margin:0 0 10px; }
 .straordtag{ font-size:11px; font-weight:700; color:#b3701c; background:#f7ecd9; padding:2px 7px; border-radius:20px; margin-left:6px; }
 .editbanner{ background:#e0ebf4; color:#2b5f8a; padding:8px 12px; border-radius:9px; font-size:13px; font-weight:600; margin-bottom:12px; }
 .editcard{ border-color:var(--accent); }
+.usergroup{ background:var(--panel); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+.grouphead{ display:flex; align-items:center; justify-content:space-between; width:100%; background:transparent; border:0; padding:12px 14px; cursor:pointer; font-family:inherit; text-align:left; }
+.grouphead:hover{ background:var(--panel2); }
+.grouptitle{ display:flex; align-items:center; gap:10px; }
+.chevron{ color:var(--muted); font-size:14px; }
+.groupbody{ padding:0 12px 12px; }
+.inlinefilter{ margin-bottom:0; min-width:180px; }
+.inlinefilter select{ min-width:180px; }
 .logactions{ display:flex; gap:6px; }
 .calcell.clickable{ cursor:pointer; }
 .calcell.clickable:hover{ background:var(--todaybg); }
