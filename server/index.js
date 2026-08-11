@@ -194,6 +194,120 @@ app.post("/api/requests/:id/decide", auth, adminOnly, async (req, res) => {
 });
 
 // ============================================================
+//  TIMBRATURA LIVE (entrata / pausa / riprendi / uscita)
+// ============================================================
+
+// Arrotonda un orario "HH:MM" al quarto d'ora più vicino.
+function roundQuarter(hhmm) {
+  const [h, m] = hhmm.split(":").map(Number);
+  let total = h * 60 + m;
+  total = Math.round(total / 15) * 15;
+  total = ((total % 1440) + 1440) % 1440; // resta nelle 24h
+  const hh = Math.floor(total / 60), mm = total % 60;
+  return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+}
+function hhmmFromDate(d) {
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+// Stato della timbratura in corso
+app.get("/api/punch", auth, async (req, res) => {
+  const { rows } = await pool.query("SELECT * FROM punch WHERE user_id=$1", [req.user.id]);
+  res.json(rows[0] || null);
+});
+
+// Entrata: crea una sessione
+app.post("/api/punch/entrata", auth, async (req, res) => {
+  try {
+    const exists = await pool.query("SELECT 1 FROM punch WHERE user_id=$1", [req.user.id]);
+    if (exists.rowCount) return res.status(400).json({ error: "Hai già una timbratura in corso." });
+    const { rows } = await pool.query(
+      "INSERT INTO punch (user_id, entrata, stato, pausa_totale) VALUES ($1, now(), 'attivo', 0) RETURNING *",
+      [req.user.id]
+    );
+    res.json(rows[0]);
+  } catch (e) { console.error(e); res.status(500).json({ error: "Errore nell'entrata." }); }
+});
+
+// Pausa: sospende il conteggio
+app.post("/api/punch/pausa", auth, async (req, res) => {
+  try {
+    const { rows } = await pool.query("SELECT * FROM punch WHERE user_id=$1", [req.user.id]);
+    const p = rows[0];
+    if (!p) return res.status(400).json({ error: "Nessuna timbratura in corso." });
+    if (p.stato === "in_pausa") return res.status(400).json({ error: "Sei già in pausa." });
+    const { rows: upd } = await pool.query(
+      "UPDATE punch SET stato='in_pausa', pausa_inizio=now() WHERE user_id=$1 RETURNING *", [req.user.id]
+    );
+    res.json(upd[0]);
+  } catch (e) { console.error(e); res.status(500).json({ error: "Errore nella pausa." }); }
+});
+
+// Riprendi: chiude la pausa e somma i minuti
+app.post("/api/punch/riprendi", auth, async (req, res) => {
+  try {
+    const { rows } = await pool.query("SELECT * FROM punch WHERE user_id=$1", [req.user.id]);
+    const p = rows[0];
+    if (!p) return res.status(400).json({ error: "Nessuna timbratura in corso." });
+    if (p.stato !== "in_pausa") return res.status(400).json({ error: "Non sei in pausa." });
+    const minutiPausa = Math.round((Date.now() - new Date(p.pausa_inizio).getTime()) / 60000);
+    const { rows: upd } = await pool.query(
+      "UPDATE punch SET stato='attivo', pausa_inizio=NULL, pausa_totale=pausa_totale+$2 WHERE user_id=$1 RETURNING *",
+      [req.user.id, minutiPausa]
+    );
+    res.json(upd[0]);
+  } catch (e) { console.error(e); res.status(500).json({ error: "Errore nel riprendere." }); }
+});
+
+// Uscita: chiude la sessione e crea la registrazione ore
+app.post("/api/punch/uscita", auth, async (req, res) => {
+  try {
+    const { rows } = await pool.query("SELECT * FROM punch WHERE user_id=$1", [req.user.id]);
+    const p = rows[0];
+    if (!p) return res.status(400).json({ error: "Nessuna timbratura in corso." });
+
+    const now = new Date();
+    let pausaMin = p.pausa_totale || 0;
+    // se esce mentre è ancora in pausa, chiude anche quella
+    if (p.stato === "in_pausa" && p.pausa_inizio) {
+      pausaMin += Math.round((now.getTime() - new Date(p.pausa_inizio).getTime()) / 60000);
+    }
+
+    const entrata = new Date(p.entrata);
+    const inizioHHMM = roundQuarter(hhmmFromDate(entrata));
+    const fineHHMM = roundQuarter(hhmmFromDate(now));
+    // arrotonda anche la pausa al quarto d'ora
+    const pausaArr = Math.round(pausaMin / 15) * 15;
+
+    // ore lavorate = (fine - inizio) - pausa
+    const [hi, mi] = inizioHHMM.split(":").map(Number);
+    const [hf, mf] = fineHHMM.split(":").map(Number);
+    let minuti = (hf * 60 + mf) - (hi * 60 + mi) - pausaArr;
+    if (minuti < 0) minuti = 0;
+    const oreTotali = minuti / 60;
+    const oreNormali = Math.min(oreTotali, 8);
+    const straordinari = Math.max(0, oreTotali - 8);
+
+    const dataISO = `${entrata.getFullYear()}-${String(entrata.getMonth()+1).padStart(2,"0")}-${String(entrata.getDate()).padStart(2,"0")}`;
+
+    const { rows: log } = await pool.query(
+      `INSERT INTO worklogs (user_id, data, inizio, fine, pausa, ore, straordinari)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [req.user.id, dataISO, inizioHHMM, fineHHMM, pausaArr,
+       Math.round(oreNormali*100)/100, Math.round(straordinari*100)/100]
+    );
+    await pool.query("DELETE FROM punch WHERE user_id=$1", [req.user.id]);
+    res.json({ worklog: log[0], straordinari: Math.round(straordinari*100)/100 });
+  } catch (e) { console.error(e); res.status(500).json({ error: "Errore nell'uscita." }); }
+});
+
+// Annulla la timbratura in corso senza registrare
+app.delete("/api/punch", auth, async (req, res) => {
+  await pool.query("DELETE FROM punch WHERE user_id=$1", [req.user.id]);
+  res.json({ ok: true });
+});
+
+// ============================================================
 //  ORE LAVORATE (dichiarate dall'utente)
 // ============================================================
 app.get("/api/worklogs", auth, async (req, res) => {
