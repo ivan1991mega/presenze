@@ -47,6 +47,13 @@ function buildGmail(email, subject, body){
 export default function App() {
   const [me, setMe] = useState(null);
   const [ready, setReady] = useState(false);
+  const [theme, setTheme] = useState(() => localStorage.getItem("tema") || "light");
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    localStorage.setItem("tema", theme);
+  }, [theme]);
+  const toggleTheme = () => setTheme(t => t === "light" ? "dark" : "light");
 
   useEffect(() => {
     (async () => {
@@ -61,16 +68,16 @@ export default function App() {
   const logout = () => { clearToken(); setMe(null); };
 
   if (!ready) return <div className="wrap"><div className="center">Caricamento…</div><style>{CSS}</style></div>;
-  if (!me) return <Auth onLogin={setMe} />;
+  if (!me) return <Auth onLogin={setMe} theme={theme} toggleTheme={toggleTheme} />;
   return me.role === "admin"
-    ? <AdminApp me={me} onLogout={logout} />
-    : <UserApp me={me} onLogout={logout} />;
+    ? <AdminApp me={me} onLogout={logout} theme={theme} toggleTheme={toggleTheme} />
+    : <UserApp me={me} onLogout={logout} theme={theme} toggleTheme={toggleTheme} />;
 }
 
 // ============================================================
 //  AUTENTICAZIONE
 // ============================================================
-function Auth({ onLogin }) {
+function Auth({ onLogin, theme, toggleTheme }) {
   const [mode, setMode] = useState("login");
   const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
@@ -90,6 +97,7 @@ function Auth({ onLogin }) {
 
   return (
     <div className="wrap authwrap">
+      <button className="btn ghost tiny themebtn corner" onClick={toggleTheme} title={theme==="dark"?"Modalità chiara":"Modalità scura"}>{theme==="dark"?"☀":"☾"}</button>
       <div className="authcard">
         <div className="brand">
           <span className="brandmark">◷</span>
@@ -121,7 +129,7 @@ function Auth({ onLogin }) {
 // ============================================================
 //  APP UTENTE
 // ============================================================
-function UserApp({ me, onLogout }) {
+function UserApp({ me, onLogout, theme, toggleTheme }) {
   const [tab, setTab] = useState("calendario");
   const [cursor, setCursor] = useState(new Date());
   const [reqs, setReqs] = useState([]);
@@ -145,7 +153,7 @@ function UserApp({ me, onLogout }) {
 
   return (
     <div className="wrap">
-      <Header me={me} onLogout={onLogout} right={<span className="rolechip user">Utente</span>} />
+      <Header me={me} onLogout={onLogout} right={<span className="rolechip user">Utente</span>} theme={theme} toggleTheme={toggleTheme} />
       <nav className="nav">
         <button className={tab==="calendario"?"navbtn on":"navbtn"} onClick={()=>setTab("calendario")}>Calendario</button>
         <button className={tab==="richieste"?"navbtn on":"navbtn"} onClick={()=>setTab("richieste")}>Richieste</button>
@@ -157,7 +165,7 @@ function UserApp({ me, onLogout }) {
       <main className="main">
         {tab==="calendario" && <UserCalendar cursor={cursor} setCursor={setCursor} reqs={reqs} logs={logs} onOpenRequest={openRequestFromCalendar} />}
         {tab==="richieste" && <UserRequests me={me} reqs={reqs} reload={reload} openReq={openReq} clearOpenReq={()=>setOpenReq(null)} />}
-        {tab==="ore" && <UserWorklogs logs={logs} detected={detected} reload={reload} />}
+        {tab==="ore" && <><PunchClock reload={reload} /><UserWorklogs logs={logs} detected={detected} reload={reload} /></>}
         {tab==="riepilogo" && <MonthlySummary reqs={reqs} logs={logs} detected={detected} cursor={cursor} setCursor={setCursor} showCompare />}
         {tab==="messaggi" && <Messages msgs={msgs} me={me} reload={reload} />}
       </main>
@@ -275,6 +283,92 @@ function UserRequests({ me, reqs, reload, openReq, clearOpenReq }) {
   );
 }
 
+// ---------- Timbratura live ----------
+function PunchClock({ reload }) {
+  const [punch, setPunch] = useState(undefined); // undefined=caricamento, null=nessuna sessione
+  const [now, setNow] = useState(Date.now());
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  const load = useCallback(async () => {
+    try { setPunch(await api.get("/api/punch")); } catch { setPunch(null); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  // aggiorna il cronometro ogni secondo mentre è attivo
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const act = async (path, okMsg) => {
+    setBusy(true); setMsg("");
+    try {
+      const res = await api.post(`/api/punch/${path}`);
+      if (path === "uscita") {
+        setMsg(res.straordinari > 0
+          ? `Uscita registrata. Attenzione: ${res.straordinari}h di STRAORDINARIO.`
+          : "Uscita registrata.");
+        await reload();
+      }
+      await load();
+      if (okMsg) setMsg(okMsg);
+    } catch (e) { setMsg(e.message); }
+    finally { setBusy(false); }
+  };
+
+  if (punch === undefined) return <div className="card"><div className="muted">Caricamento timbratura…</div></div>;
+
+  // calcolo tempo trascorso
+  let elapsed = "";
+  let straordFlag = false;
+  if (punch) {
+    const start = new Date(punch.entrata).getTime();
+    let pausaMs = (punch.pausa_totale || 0) * 60000;
+    if (punch.stato === "in_pausa" && punch.pausa_inizio) pausaMs += now - new Date(punch.pausa_inizio).getTime();
+    const workedMs = Math.max(0, now - start - pausaMs);
+    const h = Math.floor(workedMs / 3600000);
+    const m = Math.floor((workedMs % 3600000) / 60000);
+    const s = Math.floor((workedMs % 60000) / 1000);
+    elapsed = `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
+    straordFlag = workedMs > 8 * 3600000;
+  }
+
+  return (
+    <div className={punch ? "card punchcard active" : "card punchcard"}>
+      <div className="punchhead">
+        <h3>Timbratura</h3>
+        {punch && <span className={punch.stato==="in_pausa" ? "punchstate pausestate" : "punchstate"}>
+          {punch.stato==="in_pausa" ? "In pausa" : "Al lavoro"}
+        </span>}
+      </div>
+
+      {!punch ? (
+        <>
+          <p className="muted small">Clicca “Entrata” quando arrivi. Il tempo viene registrato in automatico, arrotondato al quarto d'ora.</p>
+          <button className="btn primary big" onClick={()=>act("entrata")} disabled={busy}>▶ Entrata</button>
+        </>
+      ) : (
+        <>
+          <div className={straordFlag ? "punchtimer straord" : "punchtimer"}>{elapsed}</div>
+          {straordFlag && <div className="straordbanner">Oltre le 8 ore: sei in STRAORDINARIO</div>}
+          <div className="punchbtns">
+            {punch.stato === "attivo"
+              ? <button className="btn" onClick={()=>act("pausa")} disabled={busy}>⏸ Pausa</button>
+              : <button className="btn ok" onClick={()=>act("riprendi")} disabled={busy}>▶ Riprendi</button>}
+            <button className="btn danger" onClick={()=>act("uscita")} disabled={busy}>⏹ Uscita</button>
+          </div>
+          <div className="muted small punchinfo">
+            Entrata: {new Date(punch.entrata).toLocaleTimeString("it-IT",{hour:"2-digit",minute:"2-digit"})}
+            {punch.pausa_totale > 0 && ` · pausa accumulata: ${punch.pausa_totale} min`}
+          </div>
+        </>
+      )}
+      {msg && <div className={msg.includes("STRAORDINARIO")||msg.includes("Errore") ? "alert" : "okmsg"}>{msg}</div>}
+    </div>
+  );
+}
+
+
 function UserWorklogs({ logs, detected, reload }) {
   const empty = { id:null, data:todayISO(), inizio:"09:00", fine:"18:00", pausa:"60", straordinari:"0" };
   const [f, setF] = useState(empty);
@@ -287,9 +381,15 @@ function UserWorklogs({ logs, detected, reload }) {
   const save = async () => {
     setErr("");
     if (f.fine<=f.inizio) return setErr("L'orario di fine deve essere dopo l'inizio.");
-    const ore = hoursBetween(f.inizio, f.fine) - (parseInt(f.pausa||"0",10)/60);
-    if (ore<=0) return setErr("La pausa è più lunga del turno.");
-    const payload = { data:f.data, inizio:f.inizio, fine:f.fine, pausa:parseInt(f.pausa||"0",10), ore:round2(ore), straordinari:round2(parseFloat(f.straordinari||"0")) };
+    const oreLorde = hoursBetween(f.inizio, f.fine) - (parseInt(f.pausa||"0",10)/60);
+    if (oreLorde<=0) return setErr("La pausa è più lunga del turno.");
+    // straordinario automatico oltre le 8 ore; l'utente può comunque forzare un valore
+    const straordManuale = parseFloat(f.straordinari||"0");
+    const oreNormali = Math.min(oreLorde, 8);
+    const straordAuto = Math.max(0, oreLorde - 8);
+    const straord = straordManuale > 0 ? straordManuale : round2(straordAuto);
+    const oreDaSalvare = straordManuale > 0 ? round2(oreLorde - straordManuale) : round2(oreNormali);
+    const payload = { data:f.data, inizio:f.inizio, fine:f.fine, pausa:parseInt(f.pausa||"0",10), ore:oreDaSalvare, straordinari:straord };
     try {
       if (editing) await api.put(`/api/worklogs/${f.id}`, payload);
       else await api.post("/api/worklogs", payload);
@@ -308,7 +408,7 @@ function UserWorklogs({ logs, detected, reload }) {
           <label className="field"><span>Entrata</span><input type="time" value={f.inizio} onChange={e=>setF({...f,inizio:e.target.value})} /></label>
           <label className="field"><span>Uscita</span><input type="time" value={f.fine} onChange={e=>setF({...f,fine:e.target.value})} /></label>
           <label className="field"><span>Pausa (min)</span><input type="number" min="0" step="15" value={f.pausa} onChange={e=>setF({...f,pausa:e.target.value})} /></label>
-          <label className="field"><span>Straordinari (h)</span><input type="number" min="0" step="0.25" value={f.straordinari} onChange={e=>setF({...f,straordinari:e.target.value})} /></label>
+          <label className="field"><span>Straordinari (h)</span><input type="number" min="0" step="0.25" value={f.straordinari} onChange={e=>setF({...f,straordinari:e.target.value})} placeholder="auto se >8h" /></label>
         </div>
         {err && <div className="alert">{err}</div>}
         <div className="rowend">
@@ -344,7 +444,7 @@ function UserWorklogs({ logs, detected, reload }) {
 // ============================================================
 //  APP ADMIN
 // ============================================================
-function AdminApp({ me, onLogout }) {
+function AdminApp({ me, onLogout, theme, toggleTheme }) {
   const [tab, setTab] = useState("richieste");
   const [cursor, setCursor] = useState(new Date());
   const [selected, setSelected] = useState(null);
@@ -379,7 +479,7 @@ function AdminApp({ me, onLogout }) {
 
   return (
     <div className="wrap">
-      <Header me={me} onLogout={onLogout} right={<span className="rolechip admin">Amministratore</span>} />
+      <Header me={me} onLogout={onLogout} right={<span className="rolechip admin">Amministratore</span>} theme={theme} toggleTheme={toggleTheme} />
       <nav className="nav">
         <button className={tab==="richieste"?"navbtn on":"navbtn"} onClick={()=>setTab("richieste")}>Richieste{pending.length>0 && <span className="badge">{pending.length}</span>}</button>
         <button className={tab==="calendario"?"navbtn on":"navbtn"} onClick={()=>setTab("calendario")}>Calendario team</button>
@@ -387,9 +487,9 @@ function AdminApp({ me, onLogout }) {
         <button className={tab==="rilevazioni"?"navbtn on":"navbtn"} onClick={()=>setTab("rilevazioni")}>Rilevazione ore</button>
       </nav>
       <main className="main">
-        {tab==="richieste" && <AdminRequests pending={pending} allReqs={reqs} decide={decide} />}
+        {tab==="richieste" && <AdminRequests pending={pending} allReqs={reqs} decide={decide} users={users} setTab={setTab} />}
         {tab==="calendario" && <TeamCalendar reqs={reqs} cursor={cursor} setCursor={setCursor} />}
-        {tab==="utenti" && <AdminUsers users={users} reqs={reqs} logs={logs} detected={detected} selected={selected} setSelected={setSelected} cursor={cursor} setCursor={setCursor} />}
+        {tab==="utenti" && <AdminUsers users={users} reqs={reqs} logs={logs} detected={detected} selected={selected} setSelected={setSelected} cursor={cursor} setCursor={setCursor} reload={reload} />}
         {tab==="rilevazioni" && <AdminDetected users={users} logs={logs} detected={detected} reload={reload} />}
       </main>
       <style>{CSS}</style>
@@ -397,10 +497,25 @@ function AdminApp({ me, onLogout }) {
   );
 }
 
-function AdminRequests({ pending, allReqs, decide }) {
+function AdminRequests({ pending, allReqs, decide, users, setTab }) {
   const overlaps = useMemo(()=>findOverlaps(allReqs), [allReqs]);
+  const approvate = allReqs.filter(r=>r.stato==="approvata").length;
   return (
     <div className="stack">
+      <div className="dash">
+        <button className="dashcard" onClick={()=>setTab("richieste")}>
+          <div className="dashnum">{pending.length}</div><div className="dashlbl">In attesa</div>
+        </button>
+        <button className="dashcard" onClick={()=>setTab("utenti")}>
+          <div className="dashnum">{users.length}</div><div className="dashlbl">Utenti →</div>
+        </button>
+        <button className="dashcard" onClick={()=>setTab("calendario")}>
+          <div className="dashnum">{approvate}</div><div className="dashlbl">Approvate · Calendario →</div>
+        </button>
+        <button className="dashcard accent" onClick={()=>setTab("rilevazioni")}>
+          <div className="dashnum">⏱</div><div className="dashlbl">Rilevazione ore →</div>
+        </button>
+      </div>
       <h2>Richieste da gestire</h2>
       {pending.length===0 && <div className="empty">Nessuna richiesta in attesa. Tutto in ordine.</div>}
       <div className="list">
@@ -471,7 +586,7 @@ function TeamCalendar({ reqs, cursor, setCursor }) {
   );
 }
 
-function AdminUsers({ users, reqs, logs, detected, selected, setSelected, cursor, setCursor }) {
+function AdminUsers({ users, reqs, logs, detected, selected, setSelected, cursor, setCursor, reload }) {
   if (selected) {
     const u = users.find(x=>x.id===selected);
     const uReqs = reqs.filter(r=>r.user_id===u.id);
@@ -482,6 +597,7 @@ function AdminUsers({ users, reqs, logs, detected, selected, setSelected, cursor
         <button className="btn ghost" onClick={()=>setSelected(null)}>← Tutti gli utenti</button>
         <div className="rowbetween"><h2>{u.name}</h2><span className="muted">{u.email}</span></div>
         <MonthlySummary reqs={uReqs} logs={uLogs} detected={uDet} cursor={cursor} setCursor={setCursor} showCompare />
+        <AdminUserWorklogs user={u} logs={uLogs} detected={uDet} reload={reload} />
         <div className="card">
           <h3>Storico richieste</h3>
           {uReqs.length===0 && <div className="empty">Nessuna richiesta.</div>}
@@ -509,6 +625,70 @@ function AdminUsers({ users, reqs, logs, detected, selected, setSelected, cursor
           );
         })}
         {users.length===0 && <div className="empty">Nessun utente registrato.</div>}
+      </div>
+    </div>
+  );
+}
+
+// Modifica/eliminazione delle ore di un dipendente da parte dell'admin.
+function AdminUserWorklogs({ user, logs, detected, reload }) {
+  const [f, setF] = useState(null); // registrazione in modifica
+  const [err, setErr] = useState("");
+
+  const startEdit = (l) => { setErr(""); setF({ id:l.id, data:iso(l.data), inizio:l.inizio, fine:l.fine, pausa:String(l.pausa), ore:String(round2(Number(l.ore))), straordinari:String(round2(Number(l.straordinari||0))) }); };
+  const cancel = () => { setErr(""); setF(null); };
+
+  const save = async () => {
+    setErr("");
+    if (f.fine<=f.inizio) return setErr("L'orario di fine deve essere dopo l'inizio.");
+    const payload = { data:f.data, inizio:f.inizio, fine:f.fine, pausa:parseInt(f.pausa||"0",10), ore:round2(parseFloat(f.ore||"0")), straordinari:round2(parseFloat(f.straordinari||"0")) };
+    try { await api.put(`/api/worklogs/${f.id}`, payload); cancel(); reload(); }
+    catch(e){ setErr(e.message); }
+  };
+  const remove = async (l) => { if(!confirm("Eliminare questa registrazione del dipendente?"))return; try { await api.del(`/api/worklogs/${l.id}`); reload(); } catch(e){ alert(e.message); } };
+
+  const sorted = [...logs].sort((a,b)=> iso(a.data)<iso(b.data)?1:-1);
+
+  return (
+    <div className="card">
+      <h3>Ore registrate del dipendente</h3>
+      <p className="muted small">Puoi correggere o eliminare le registrazioni in caso di incongruenza. Le modifiche sono immediate.</p>
+      {f && (
+        <div className="card formcard editcard">
+          <div className="editbanner">Modifica registrazione del {fmtDate(f.data)}</div>
+          <div className="grid3">
+            <label className="field"><span>Data</span><input type="date" value={f.data} onChange={e=>setF({...f,data:e.target.value})} /></label>
+            <label className="field"><span>Entrata</span><input type="time" value={f.inizio} onChange={e=>setF({...f,inizio:e.target.value})} /></label>
+            <label className="field"><span>Uscita</span><input type="time" value={f.fine} onChange={e=>setF({...f,fine:e.target.value})} /></label>
+          </div>
+          <div className="grid3">
+            <label className="field"><span>Pausa (min)</span><input type="number" min="0" step="15" value={f.pausa} onChange={e=>setF({...f,pausa:e.target.value})} /></label>
+            <label className="field"><span>Ore</span><input type="number" min="0" step="0.25" value={f.ore} onChange={e=>setF({...f,ore:e.target.value})} /></label>
+            <label className="field"><span>Straordinari (h)</span><input type="number" min="0" step="0.25" value={f.straordinari} onChange={e=>setF({...f,straordinari:e.target.value})} /></label>
+          </div>
+          {err && <div className="alert">{err}</div>}
+          <div className="rowend"><button className="btn ghost" onClick={cancel}>Annulla</button><button className="btn primary" onClick={save}>Salva modifiche</button></div>
+        </div>
+      )}
+      {sorted.length===0 && <div className="empty">Nessuna registrazione ore.</div>}
+      <div className="list">
+        {sorted.map(l=>{
+          const det = detected.find(x=>iso(x.data)===iso(l.data));
+          const diff = det ? round2(Number(l.ore)-Number(det.ore)) : null;
+          const straord = Number(l.straordinari||0);
+          return (
+            <div key={l.id} className="logrow">
+              <div className="logdate">{fmtDate(l.data)}</div>
+              <div className="logtimes">{l.inizio}–{l.fine} · pausa {l.pausa}′</div>
+              <div className="loghours">{round2(Number(l.ore))}h {straord>0 && <span className="straordtag">+{straord}h str.</span>}</div>
+              <div className="logcompare">{det ? <span className={diff===0?"cmp ok":"cmp warn"}>Rilevate {round2(Number(det.ore))}h {diff!==0&&`(Δ ${diff>0?"+":""}${diff}h)`}</span> : <span className="muted small">nessun rilevamento</span>}</div>
+              <div className="logactions">
+                <button className="btn tiny" onClick={()=>startEdit(l)}>Modifica</button>
+                <button className="btn tiny danger" onClick={()=>remove(l)}>Elimina</button>
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -568,11 +748,12 @@ function AdminDetected({ users, logs, detected, reload }) {
 // ============================================================
 //  COMPONENTI CONDIVISI
 // ============================================================
-function Header({ me, onLogout, right }) {
+function Header({ me, onLogout, right, theme, toggleTheme }) {
   return (
     <header className="topbar">
       <div className="brand small"><span className="brandmark">◷</span><strong>Gestione ore</strong></div>
       <div className="topright">{right}
+        <button className="btn ghost tiny themebtn" onClick={toggleTheme} title={theme==="dark"?"Modalità chiara":"Modalità scura"}>{theme==="dark"?"☀":"☾"}</button>
         <div className="whoami"><div className="avatar">{initials(me.name)}</div><span className="hidemobile">{me.name}</span></div>
         <button className="btn ghost tiny" onClick={onLogout}>Esci</button>
       </div>
@@ -693,7 +874,8 @@ function findOverlaps(requests){
 // ============================================================
 const CSS = `
 * { box-sizing:border-box; }
-:root{ --bg:#f6f4ef; --panel:#fff; --ink:#1f2724; --muted:#7c857f; --line:#e7e3da; --accent:#3a7d6b; --accent-ink:#245a4c; --radius:14px; --shadow:0 1px 3px rgba(30,40,35,.06),0 6px 20px rgba(30,40,35,.05); }
+:root{ --bg:#f6f4ef; --panel:#fff; --ink:#1f2724; --muted:#7c857f; --line:#e7e3da; --accent:#3a7d6b; --accent-ink:#245a4c; --radius:14px; --shadow:0 1px 3px rgba(30,40,35,.06),0 6px 20px rgba(30,40,35,.05); --panel2:#fafaf8; --todaybg:#eef6f2; }
+:root[data-theme="dark"]{ --bg:#161a19; --panel:#1f2523; --ink:#e8eae8; --muted:#9aa39d; --line:#333b38; --accent:#4f9d87; --accent-ink:#7bc0ac; --shadow:0 1px 3px rgba(0,0,0,.3),0 6px 20px rgba(0,0,0,.25); --panel2:#242b28; --todaybg:#232e2a; }
 body{ margin:0; }
 .wrap{ min-height:100vh; background:var(--bg); color:var(--ink); font-family:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
 .center{ max-width:400px; margin:20vh auto; text-align:center; }
@@ -726,12 +908,13 @@ h3{ font-size:16px; margin:0 0 10px; }
 .rowbetween{ display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; }
 .rowend{ display:flex; justify-content:flex-end; gap:8px; margin-top:12px; }
 .field{ display:flex; flex-direction:column; gap:5px; font-size:13px; font-weight:600; color:var(--muted); margin-bottom:12px; }
-.field input,.field select,.field textarea{ border:1px solid var(--line); border-radius:10px; padding:10px 12px; font-size:14px; font-family:inherit; color:var(--ink); background:#fff; font-weight:500; }
+.field input,.field select,.field textarea{ border:1px solid var(--line); border-radius:10px; padding:10px 12px; font-size:14px; font-family:inherit; color:var(--ink); background:var(--panel); font-weight:500; }
 .field input:focus,.field select:focus,.field textarea:focus{ outline:2px solid var(--accent); border-color:transparent; }
 .grid2{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
 .grid3{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; }
 .grid4{ display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
-.btn{ border:1px solid var(--line); background:#fff; border-radius:10px; padding:9px 16px; font-weight:600; font-size:14px; cursor:pointer; color:var(--ink); font-family:inherit; transition:transform .05s,background .15s; }
+.grid5{ display:grid; grid-template-columns:repeat(5,1fr); gap:12px; }
+.btn{ border:1px solid var(--line); background:var(--panel); border-radius:10px; padding:9px 16px; font-weight:600; font-size:14px; cursor:pointer; color:var(--ink); font-family:inherit; transition:transform .05s,background .15s; }
 .btn:active{ transform:translateY(1px); } .btn:disabled{ opacity:.6; cursor:default; }
 .btn.primary{ background:var(--accent); border-color:var(--accent); color:#fff; }
 .btn.primary:hover:not(:disabled){ background:var(--accent-ink); }
@@ -769,8 +952,8 @@ h3{ font-size:16px; margin:0 0 10px; }
 .calbody{ display:grid; grid-template-columns:repeat(7,1fr); }
 .calcell{ min-height:76px; border-top:1px solid var(--line); border-left:1px solid var(--line); padding:5px; position:relative; }
 .calcell:nth-child(7n+1){ border-left:0; }
-.calcell.empty{ background:#fafaf8; }
-.calcell.today{ background:#eef6f2; }
+.calcell.empty{ background:var(--panel2); }
+.calcell.today{ background:var(--todaybg); }
 .calnum{ font-size:12px; font-weight:700; color:var(--muted); }
 .calcell.today .calnum{ color:var(--accent); }
 .daytags{ display:flex; flex-direction:column; gap:3px; margin-top:3px; }
@@ -799,17 +982,50 @@ h3{ font-size:16px; margin:0 0 10px; }
 .msgside{ display:flex; flex-direction:column; align-items:flex-end; gap:6px; }
 .dot{ display:inline-block; width:8px; height:8px; border-radius:50%; background:#d9534f; margin-left:4px; }
 .hidemobile{ display:inline; }
-.grid5{ display:grid; grid-template-columns:repeat(5,1fr); gap:12px; }
+.themebtn{ font-size:16px; line-height:1; }
+.themebtn.corner{ position:absolute; top:18px; right:18px; }
+.dash{ display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
+.dashcard{ background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:16px; cursor:pointer; text-align:left; font-family:inherit; box-shadow:var(--shadow); transition:transform .05s, border-color .15s; }
+.dashcard:hover{ border-color:var(--accent); }
+.dashcard:active{ transform:translateY(1px); }
+.dashcard.accent{ background:var(--accent); border-color:var(--accent); }
+.dashcard.accent .dashnum,.dashcard.accent .dashlbl{ color:#fff; }
+.dashnum{ font-size:26px; font-weight:800; color:var(--ink); letter-spacing:-.02em; }
+.dashlbl{ font-size:12.5px; color:var(--muted); font-weight:600; margin-top:2px; }
+.okmsg{ background:var(--panel2); color:var(--accent-ink); padding:10px 12px; border-radius:10px; font-size:13px; margin-top:12px; font-weight:600; border:1px solid var(--line); }
+/* timbratura */
+.punchcard{ text-align:center; }
+.punchcard.active{ border-color:var(--accent); }
+.punchhead{ display:flex; align-items:center; justify-content:center; gap:12px; margin-bottom:6px; }
+.punchhead h3{ margin:0; }
+.punchstate{ font-size:12px; font-weight:700; padding:3px 10px; border-radius:20px; background:var(--panel2); color:var(--accent-ink); border:1px solid var(--line); }
+.punchstate.pausestate{ color:#b3701c; }
+.punchtimer{ font-size:44px; font-weight:800; letter-spacing:.02em; font-variant-numeric:tabular-nums; margin:10px 0; color:var(--ink); }
+.punchtimer.straord{ color:#b3701c; }
+.straordbanner{ background:#f7ecd9; color:#8a5410; font-weight:700; font-size:13px; padding:8px 12px; border-radius:9px; margin-bottom:12px; display:inline-block; }
+.punchbtns{ display:flex; gap:10px; justify-content:center; margin:14px 0 8px; }
+.punchbtns .btn{ min-width:120px; padding:12px 18px; font-size:15px; }
+.punchinfo{ margin-top:6px; }
+/* nav e filtri più cliccabili */
+.navbtn{ padding:10px 16px; }
+@media (max-width:640px){
+  .grid3,.grid4,.grid5{ grid-template-columns:1fr 1fr; } .stats,.stats5{ grid-template-columns:1fr 1fr; }
+  .hidemobile{ display:none; } .calcell{ min-height:60px; } .main{ padding:16px 12px 50px; }
+  .reqactions{ width:100%; margin-left:0; } .logcompare{ margin-left:0; width:100%; }
+  .nav{ gap:6px; } .navbtn{ padding:10px 14px; font-size:13.5px; }
+  .dash{ grid-template-columns:1fr 1fr; }
+  .punchtimer{ font-size:38px; } .punchbtns{ flex-wrap:wrap; } .punchbtns .btn{ flex:1; min-width:100px; }
+}
+@media (max-width:420px){ .grid2,.grid3,.grid4,.grid5{ grid-template-columns:1fr; } }
 .straordtag{ font-size:11px; font-weight:700; color:#b3701c; background:#f7ecd9; padding:2px 7px; border-radius:20px; margin-left:6px; }
 .editbanner{ background:#e0ebf4; color:#2b5f8a; padding:8px 12px; border-radius:9px; font-size:13px; font-weight:600; margin-bottom:12px; }
+.editcard{ border-color:var(--accent); }
 .logactions{ display:flex; gap:6px; }
 .calcell.clickable{ cursor:pointer; }
-.calcell.clickable:hover{ background:#eef6f2; }
+.calcell.clickable:hover{ background:var(--todaybg); }
 .mailbtns{ display:flex; gap:6px; }
 .modalback{ position:fixed; inset:0; background:rgba(20,25,22,.45); display:flex; align-items:center; justify-content:center; padding:20px; z-index:50; }
 .modal{ background:var(--panel); border-radius:16px; box-shadow:0 12px 40px rgba(0,0,0,.25); padding:20px; width:100%; max-width:520px; max-height:80vh; overflow:auto; }
 .modalhead{ display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; }
 .modalhead h3{ margin:0; }
-@media (max-width:640px){ .grid3,.grid4,.grid5{ grid-template-columns:1fr 1fr; } .stats,.stats5{ grid-template-columns:1fr 1fr; } .hidemobile{ display:none; } .calcell{ min-height:60px; } .main{ padding:16px 12px 50px; } .reqactions{ width:100%; margin-left:0; } .logcompare{ margin-left:0; width:100%; } }
-@media (max-width:420px){ .grid2,.grid3,.grid4,.grid5{ grid-template-columns:1fr; } }
 `;
