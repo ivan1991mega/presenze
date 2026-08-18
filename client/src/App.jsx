@@ -476,6 +476,12 @@ function AdminApp({ me, onLogout, theme, toggleTheme }) {
     } catch(e){ alert(e.message); }
   };
 
+  const removeRequest = async (r) => {
+    if (!confirm(`Eliminare definitivamente la richiesta di ${TIPI[r.tipo].label.toLowerCase()} di ${r.user_name}?`)) return;
+    try { await api.del(`/api/requests/${r.id}`); reload(); }
+    catch(e){ alert(e.message); }
+  };
+
   return (
     <div className="wrap">
       <Header me={me} onLogout={onLogout} right={<span className="rolechip admin">Amministratore</span>} theme={theme} toggleTheme={toggleTheme} />
@@ -486,7 +492,7 @@ function AdminApp({ me, onLogout, theme, toggleTheme }) {
         <button className={tab==="rilevazioni"?"navbtn on":"navbtn"} onClick={()=>setTab("rilevazioni")}>Rilevazione ore</button>
       </nav>
       <main className="main">
-        {tab==="richieste" && <AdminRequests pending={pending} allReqs={reqs} decide={decide} users={users} setTab={setTab} />}
+        {tab==="richieste" && <AdminRequests pending={pending} allReqs={reqs} decide={decide} removeRequest={removeRequest} users={users} setTab={setTab} />}
         {tab==="calendario" && <TeamCalendar reqs={reqs} cursor={cursor} setCursor={setCursor} />}
         {tab==="utenti" && <AdminUsers users={users} reqs={reqs} logs={logs} detected={detected} selected={selected} setSelected={setSelected} cursor={cursor} setCursor={setCursor} reload={reload} />}
         {tab==="rilevazioni" && <AdminDetected users={users} logs={logs} detected={detected} reload={reload} />}
@@ -532,6 +538,61 @@ function AdminRequests({ pending, allReqs, decide, users, setTab }) {
         })}
       </div>
       {pending.some(r=>overlaps[r.id]) && <p className="muted small">⚠ Alcune richieste si sovrappongono nello stesso periodo: controlla il calendario team.</p>}
+
+      <AllRequests allReqs={allReqs} decide={decide} removeRequest={removeRequest} users={users} />
+    </div>
+  );
+}
+
+// Tutte le richieste: l'admin può cambiare stato (anche rimettere in attesa) ed eliminare.
+function AllRequests({ allReqs, decide, removeRequest, users }) {
+  const [filtroStato, setFiltroStato] = useState("");
+  const [filtroUtente, setFiltroUtente] = useState("");
+
+  const lista = allReqs.filter(r =>
+    (!filtroStato || r.stato===filtroStato) &&
+    (!filtroUtente || r.user_id===Number(filtroUtente))
+  );
+
+  return (
+    <div className="card">
+      <div className="rowbetween">
+        <h3>Tutte le richieste</h3>
+        <div className="filterrow">
+          <label className="field inlinefilter"><span>Stato</span>
+            <select value={filtroStato} onChange={e=>setFiltroStato(e.target.value)}>
+              <option value="">Tutti</option>
+              <option value="in_attesa">In attesa</option>
+              <option value="approvata">Approvate</option>
+              <option value="respinta">Respinte</option>
+            </select>
+          </label>
+          <label className="field inlinefilter"><span>Utente</span>
+            <select value={filtroUtente} onChange={e=>setFiltroUtente(e.target.value)}>
+              <option value="">Tutti</option>
+              {users.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}
+            </select>
+          </label>
+        </div>
+      </div>
+      {lista.length===0 && <div className="empty">Nessuna richiesta con questi filtri.</div>}
+      <div className="list">
+        {lista.map(r=>(
+          <div key={r.id} className="reqrow admin">
+            <div className="reqwho"><div className="avatar">{initials(r.user_name)}</div>
+              <div><div className="reqtitle">{r.user_name}</div><div className="muted small">{describeReq(r)}</div></div></div>
+            <span className="pill" style={{background:TIPI[r.tipo].bg,color:TIPI[r.tipo].color}}>{TIPI[r.tipo].label}</span>
+            <span className="pill" style={{background:STATI[r.stato].bg,color:STATI[r.stato].color}}>{STATI[r.stato].label}</span>
+            <div className="reqactions">
+              {r.stato!=="approvata" && <button className="btn tiny ok" onClick={()=>decide(r,"approvata")}>Approva</button>}
+              {r.stato!=="respinta" && <button className="btn tiny warn" onClick={()=>decide(r,"respinta")}>Respingi</button>}
+              {r.stato!=="in_attesa" && <button className="btn tiny" onClick={()=>decide(r,"in_attesa")}>In attesa</button>}
+              <button className="btn tiny danger" onClick={()=>removeRequest(r)}>Elimina</button>
+            </div>
+          </div>
+        ))}
+      </div>
+      <p className="muted small">Puoi cambiare lo stato di qualsiasi richiesta o eliminarla del tutto. Ogni cambio di stato invia una notifica al dipendente.</p>
     </div>
   );
 }
@@ -925,6 +986,7 @@ const CSS = `
 :root[data-theme="dark"] .cmp.warn{ background:#3a3020; color:#e8c58a; }
 :root[data-theme="dark"] .btn.ok{ background:#22322b; border-color:#2f4a3d; color:#8ed3b6; }
 :root[data-theme="dark"] .btn.danger{ background:#3a2323; border-color:#4d2f2f; color:#f0b8b8; }
+:root[data-theme="dark"] .btn.warn{ background:#3a3020; border-color:#4d4028; color:#e8c58a; }
 :root[data-theme="dark"] .rolechip.admin{ background:#312a44; color:#c3b0e6; }
 :root[data-theme="dark"] .rolechip.user{ background:#22322b; color:#8ed3b6; }
 /* Le pill di tipo/stato usano colori inline chiari: in dark riduco la loro luminosità sfondo via mix */
@@ -981,6 +1043,8 @@ h3{ font-size:16px; margin:0 0 10px; }
 .btn.tiny{ padding:6px 11px; font-size:13px; }
 .btn.ok{ background:#e4f0e9; border-color:#c7e0d3; color:var(--accent-ink); }
 .btn.danger{ background:#f9e9e9; border-color:#f0d3d3; color:#9a3b3b; }
+.btn.warn{ background:#f7ecd9; border-color:#e8d3b0; color:#8a5410; }
+.filterrow{ display:flex; gap:10px; flex-wrap:wrap; }
 .alert{ background:#f9e9e9; color:#9a3b3b; padding:10px 12px; border-radius:10px; font-size:13px; margin-bottom:12px; font-weight:500; }
 .empty{ text-align:center; color:var(--muted); padding:28px; font-size:14px; background:var(--bg); border-radius:12px; }
 .list{ display:flex; flex-direction:column; gap:8px; }
