@@ -148,7 +148,7 @@ function UserApp({ me, onLogout, theme, toggleTheme }) {
   }, []);
   useEffect(() => { reload(); }, [reload]);
 
-  const unread = msgs.filter(m=>!m.read).length;
+  const unread = msgs.filter(m=>!m.read && !m.archived).length;
 
   return (
     <div className="wrap">
@@ -934,21 +934,67 @@ function MonthlySummary({ reqs, logs, detected, cursor, setCursor, showCompare }
 }
 function Stat({label,value,color}) { return <div className="stat"><div className="statval" style={{color}}>{value}</div><div className="statlabel">{label}</div></div>; }
 function Messages({ msgs, me, reload }) {
+  const [mostraArchiviati, setMostraArchiviati] = useState(false);
+  const [busy, setBusy] = useState(false);
+
   const markRead = async (m) => { if(m.read)return; await api.post(`/api/messages/${m.id}/read`); reload(); };
+  const archivia = async (m) => { await api.post(`/api/messages/${m.id}/archive`); reload(); };
+  const ripristina = async (m) => { await api.post(`/api/messages/${m.id}/unarchive`); reload(); };
+  const elimina = async (m) => { if(!confirm("Eliminare questa comunicazione?"))return; await api.del(`/api/messages/${m.id}`); reload(); };
+
+  const archiviaLette = async () => {
+    setBusy(true);
+    try { const r = await api.post("/api/messages/archive-read"); reload(); if(r.count===0) alert("Nessuna comunicazione letta da archiviare."); }
+    catch(e){ alert(e.message); } finally { setBusy(false); }
+  };
+  const eliminaLette = async () => {
+    if(!confirm("Eliminare definitivamente TUTTE le comunicazioni già lette?"))return;
+    setBusy(true);
+    try { const r = await api.post("/api/messages/delete-read"); reload(); if(r.count===0) alert("Nessuna comunicazione letta da eliminare."); }
+    catch(e){ alert(e.message); } finally { setBusy(false); }
+  };
+
+  // di default mostro solo i NON archiviati; con l'interruttore vedo gli archiviati
+  const visibili = msgs.filter(m => mostraArchiviati ? m.archived : !m.archived);
+  const nonLette = msgs.filter(m => !m.archived && !m.read).length;
+  const letteAttive = msgs.filter(m => !m.archived && m.read).length;
+  const archiviateTot = msgs.filter(m => m.archived).length;
+
   return (
     <div className="stack">
-      <h2>Comunicazioni</h2>
-      {msgs.length===0 && <div className="empty">Nessuna comunicazione.</div>}
-      <div className="list">{msgs.map(m=>(
+      <div className="rowbetween">
+        <h2>Comunicazioni {nonLette>0 && <span className="badge">{nonLette}</span>}</h2>
+        <div className="filterrow">
+          {!mostraArchiviati && letteAttive>0 && (
+            <>
+              <button className="btn tiny" onClick={archiviaLette} disabled={busy}>Archivia lette</button>
+              <button className="btn tiny danger" onClick={eliminaLette} disabled={busy}>Elimina lette</button>
+            </>
+          )}
+          <button className="btn tiny ghost" onClick={()=>setMostraArchiviati(v=>!v)}>
+            {mostraArchiviati ? "← Torna ai messaggi" : `Archiviati${archiviateTot>0?` (${archiviateTot})`:""}`}
+          </button>
+        </div>
+      </div>
+
+      {visibili.length===0 && (
+        <div className="empty">{mostraArchiviati ? "Nessuna comunicazione archiviata." : "Nessuna comunicazione da leggere."}</div>
+      )}
+
+      <div className="list">{visibili.map(m=>(
         <div key={m.id} className={m.read?"msgrow":"msgrow unreadrow"} onClick={()=>markRead(m)}>
           <div className="msgmain"><div className="reqtitle">{m.subject} {!m.read && <span className="dot" />}</div><div className="muted small">{m.body}</div></div>
           <div className="msgside"><span className="muted small">{fmtDate(m.created_at)}</span>
             <div className="mailbtns" onClick={e=>e.stopPropagation()}>
-              <a className="btn tiny" href={buildGmail(me.email, m.subject, m.body)} target="_blank" rel="noreferrer">Apri in Gmail</a>
+              <a className="btn tiny" href={buildGmail(me.email, m.subject, m.body)} target="_blank" rel="noreferrer">Gmail</a>
+              {mostraArchiviati
+                ? <button className="btn tiny" onClick={()=>ripristina(m)}>Ripristina</button>
+                : <button className="btn tiny" onClick={()=>archivia(m)}>Archivia</button>}
+              <button className="btn tiny danger" onClick={()=>elimina(m)}>Elimina</button>
             </div></div>
         </div>
       ))}</div>
-      <p className="muted small">Le conferme arrivano qui in tempo reale. Se l'invio email è configurato, ricevi anche una mail.</p>
+      <p className="muted small">Le conferme arrivano qui in tempo reale. Puoi archiviare o eliminare le comunicazioni già lette, singolarmente o tutte insieme, così resti con in vista solo quelle nuove.</p>
     </div>
   );
 }
