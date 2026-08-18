@@ -64,6 +64,7 @@ export async function initDb() {
       subject    TEXT NOT NULL,
       body       TEXT NOT NULL,
       read       BOOLEAN DEFAULT false,
+      archived   BOOLEAN DEFAULT false,
       created_at TIMESTAMPTZ DEFAULT now()
     );
 
@@ -79,6 +80,8 @@ export async function initDb() {
 
   // Migrazione: aggiunge la colonna straordinari se il database è di una versione precedente.
   await pool.query(`ALTER TABLE worklogs ADD COLUMN IF NOT EXISTS straordinari NUMERIC(5,2) DEFAULT 0;`);
+  // Migrazione: aggiunge la colonna archived ai messaggi.
+  await pool.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS archived BOOLEAN DEFAULT false;`);
 
   // Seed admin se il database è vuoto.
   const { rows } = await pool.query("SELECT COUNT(*)::int AS n FROM users");
