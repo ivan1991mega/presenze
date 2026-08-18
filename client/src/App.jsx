@@ -35,8 +35,7 @@ function describeReq(r){
   const days = eachDay(r.data_inizio, r.data_fine).length;
   return iso(r.data_inizio)===iso(r.data_fine) ? `${fmtDate(r.data_inizio)} (1 giorno)` : `${fmtDate(r.data_inizio)} → ${fmtDate(r.data_fine)} (${days} giorni)`;
 }
-function buildMailto(email, subject, body){ return `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`; }
-// Link per comporre l'email direttamente in Gmail web (utile per chi non ha un client di posta configurato).
+// Link per comporre l'email direttamente in Gmail web (nessun client di sistema richiesto).
 function buildGmail(email, subject, body){
   return `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(email)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 }
@@ -884,8 +883,7 @@ function Messages({ msgs, me, reload }) {
           <div className="msgmain"><div className="reqtitle">{m.subject} {!m.read && <span className="dot" />}</div><div className="muted small">{m.body}</div></div>
           <div className="msgside"><span className="muted small">{fmtDate(m.created_at)}</span>
             <div className="mailbtns" onClick={e=>e.stopPropagation()}>
-              <a className="btn tiny" href={buildGmail(me.email, m.subject, m.body)} target="_blank" rel="noreferrer">Gmail</a>
-              <a className="btn tiny ghost" href={buildMailto(me.email, m.subject, m.body)}>Altro</a>
+              <a className="btn tiny" href={buildGmail(me.email, m.subject, m.body)} target="_blank" rel="noreferrer">Apri in Gmail</a>
             </div></div>
         </div>
       ))}</div>
@@ -1049,15 +1047,64 @@ h3{ font-size:16px; margin:0 0 10px; }
 .punchinfo{ margin-top:6px; }
 /* nav e filtri più cliccabili */
 .navbtn{ padding:10px 16px; }
-@media (max-width:640px){
-  .grid3,.grid4,.grid5{ grid-template-columns:1fr 1fr; } .stats,.stats5{ grid-template-columns:1fr 1fr; }
-  .hidemobile{ display:none; } .calcell{ min-height:60px; } .main{ padding:16px 12px 50px; }
-  .reqactions{ width:100%; margin-left:0; } .logcompare{ margin-left:0; width:100%; }
-  .nav{ gap:6px; } .navbtn{ padding:10px 14px; font-size:13.5px; }
-  .dash{ grid-template-columns:1fr 1fr; }
-  .punchtimer{ font-size:38px; } .punchbtns{ flex-wrap:wrap; } .punchbtns .btn{ flex:1; min-width:100px; }
+/* ===== Tablet (fino a 900px) ===== */
+@media (max-width:900px){
+  .main{ max-width:100%; }
+  .grid4,.grid5{ grid-template-columns:repeat(3,1fr); }
+  .stats,.stats5{ grid-template-columns:repeat(3,1fr); }
+  .dash{ grid-template-columns:repeat(2,1fr); }
+  .usergrid{ grid-template-columns:repeat(2,1fr); }
 }
-@media (max-width:420px){ .grid2,.grid3,.grid4,.grid5{ grid-template-columns:1fr; } }
+
+/* ===== Telefono (fino a 640px) ===== */
+@media (max-width:640px){
+  .grid2,.grid3,.grid4,.grid5{ grid-template-columns:1fr 1fr; }
+  .stats,.stats5{ grid-template-columns:1fr 1fr; }
+  .hidemobile{ display:none; }
+  .main{ padding:14px 10px 60px; }
+  .card{ padding:14px; }
+  .topbar{ padding:12px 14px; }
+  .topright{ gap:8px; }
+  .nav{ gap:4px; padding:8px 10px; }
+  .navbtn{ padding:9px 12px; font-size:13px; }
+  .dash{ grid-template-columns:1fr 1fr; gap:8px; }
+  .usergrid{ grid-template-columns:1fr; }
+
+  /* righe ore/richieste: impilano in blocco leggibile invece di spezzarsi male */
+  .logrow{ gap:6px 10px; }
+  .logrow .logdate{ min-width:auto; width:100%; font-size:15px; }
+  .logcompare{ margin-left:0; width:100%; }
+  .logactions{ width:100%; }
+  .logactions .btn{ flex:1; }
+  .reqrow{ gap:8px; }
+  .reqactions{ width:100%; margin-left:0; }
+  .reqactions .btn{ flex:1; }
+
+  /* calendario: numeri più leggibili, tag compatti */
+  .calcell{ min-height:58px; padding:3px; }
+  .calheadcell{ font-size:11px; padding:6px 2px; }
+  .daytag{ font-size:9.5px; padding:2px 3px; }
+  .teamtag{ font-size:9px; }
+
+  /* timbratura */
+  .punchtimer{ font-size:40px; }
+  .punchbtns{ flex-wrap:wrap; } .punchbtns .btn{ flex:1; min-width:100px; }
+
+  /* filtri e modali a tutta larghezza */
+  .inlinefilter,.inlinefilter select{ min-width:0; width:100%; }
+  .rowbetween{ gap:8px; }
+  .modal{ max-width:100%; padding:16px; }
+  .comparebar{ gap:10px; font-size:13px; }
+}
+
+/* ===== Telefono piccolo (fino a 400px) ===== */
+@media (max-width:400px){
+  .grid2,.grid3,.grid4,.grid5{ grid-template-columns:1fr; }
+  .stats,.stats5{ grid-template-columns:1fr 1fr; }
+  .dash{ grid-template-columns:1fr; }
+  .brand h1{ font-size:20px; }
+  .punchtimer{ font-size:34px; }
+}
 .straordtag{ font-size:11px; font-weight:700; color:#b3701c; background:#f7ecd9; padding:2px 7px; border-radius:20px; margin-left:6px; }
 .editbanner{ background:#e0ebf4; color:#2b5f8a; padding:8px 12px; border-radius:9px; font-size:13px; font-weight:600; margin-bottom:12px; }
 .editcard{ border-color:var(--accent); }
