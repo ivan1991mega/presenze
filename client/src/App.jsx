@@ -915,7 +915,26 @@ const CSS = `
 * { box-sizing:border-box; }
 :root{ --bg:#f6f4ef; --panel:#fff; --ink:#1f2724; --muted:#7c857f; --line:#e7e3da; --accent:#3a7d6b; --accent-ink:#245a4c; --radius:14px; --shadow:0 1px 3px rgba(30,40,35,.06),0 6px 20px rgba(30,40,35,.05); --panel2:#fafaf8; --todaybg:#eef6f2; }
 :root[data-theme="dark"]{ --bg:#161a19; --panel:#1f2523; --ink:#e8eae8; --muted:#9aa39d; --line:#333b38; --accent:#4f9d87; --accent-ink:#7bc0ac; --shadow:0 1px 3px rgba(0,0,0,.3),0 6px 20px rgba(0,0,0,.25); --panel2:#242b28; --todaybg:#232e2a; }
-body{ margin:0; }
+/* Adattamenti dark per banner ed etichette con colori fissi */
+:root[data-theme="dark"] .alert{ background:#3a2323; color:#f0b8b8; }
+:root[data-theme="dark"] .editbanner{ background:#22323f; color:#a9cee8; }
+:root[data-theme="dark"] .straordbanner{ background:#3a3020; color:#e8c58a; }
+:root[data-theme="dark"] .straordtag{ background:#3a3020; color:#e8c58a; }
+:root[data-theme="dark"] .warnpill{ background:#3a3020; color:#e8c58a; }
+:root[data-theme="dark"] .cmp.ok{ background:#22322b; color:#8ed3b6; }
+:root[data-theme="dark"] .cmp.warn{ background:#3a3020; color:#e8c58a; }
+:root[data-theme="dark"] .btn.ok{ background:#22322b; border-color:#2f4a3d; color:#8ed3b6; }
+:root[data-theme="dark"] .btn.danger{ background:#3a2323; border-color:#4d2f2f; color:#f0b8b8; }
+:root[data-theme="dark"] .rolechip.admin{ background:#312a44; color:#c3b0e6; }
+:root[data-theme="dark"] .rolechip.user{ background:#22322b; color:#8ed3b6; }
+/* Le pill di tipo/stato usano colori inline chiari: in dark riduco la loro luminosità sfondo via mix */
+:root[data-theme="dark"] .pill{ filter:brightness(.9) saturate(1.1); }
+html{ background:var(--bg); }
+body{ margin:0; background:var(--bg); color:var(--ink); font-family:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+/* i controlli di default nei browser non ereditano il colore: lo forzo dove non è già impostato */
+h1,h2,h3,h4,h5,p,label,li,td,th{ color:var(--ink); }
+select,input,textarea,option{ color:var(--ink); }
+.reqtitle,.logdate,.loghours,.monthlabel,.statval,.calnum,.punchtimer{ color:var(--ink); }
 .wrap{ min-height:100vh; background:var(--bg); color:var(--ink); font-family:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
 .center{ max-width:400px; margin:20vh auto; text-align:center; }
 .authwrap{ display:flex; align-items:center; justify-content:center; padding:24px; }
@@ -1016,7 +1035,7 @@ h3{ font-size:16px; margin:0 0 10px; }
 .usercardbody{ flex:1; }
 .usercard .badge.solid{ position:absolute; top:10px; right:10px; }
 .msgrow{ display:flex; gap:14px; justify-content:space-between; align-items:flex-start; background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px; cursor:pointer; }
-.unreadrow{ border-color:var(--accent); background:#f4faf7; }
+.unreadrow{ border-color:var(--accent); background:var(--todaybg); }
 .msgmain{ flex:1; }
 .msgside{ display:flex; flex-direction:column; align-items:flex-end; gap:6px; }
 .dot{ display:inline-block; width:8px; height:8px; border-radius:50%; background:#d9534f; margin-left:4px; }
