@@ -152,8 +152,11 @@ app.delete("/api/requests/:id", auth, async (req, res) => {
     const { rows } = await pool.query("SELECT * FROM requests WHERE id=$1", [req.params.id]);
     const r = rows[0];
     if (!r) return res.status(404).json({ error: "Richiesta non trovata." });
-    if (r.user_id !== req.user.id) return res.status(403).json({ error: "Non puoi eliminare questa richiesta." });
-    if (!canEdit(r)) return res.status(400).json({ error: "Eliminabile solo se in attesa e futura." });
+    // L'admin può eliminare qualsiasi richiesta; l'utente solo le proprie in attesa e future.
+    if (req.user.role !== "admin") {
+      if (r.user_id !== req.user.id) return res.status(403).json({ error: "Non puoi eliminare questa richiesta." });
+      if (!canEdit(r)) return res.status(400).json({ error: "Eliminabile solo se in attesa e futura." });
+    }
     await pool.query("DELETE FROM requests WHERE id=$1", [req.params.id]);
     res.json({ ok: true });
   } catch (e) {
@@ -162,10 +165,10 @@ app.delete("/api/requests/:id", auth, async (req, res) => {
   }
 });
 
-// Admin: approva / respingi + notifica (in-app sempre, email se SMTP configurato)
+// Admin: cambia stato (approva / respingi / rimetti in attesa) + notifica
 app.post("/api/requests/:id/decide", auth, adminOnly, async (req, res) => {
-  const { stato } = req.body; // approvata | respinta
-  if (!["approvata", "respinta"].includes(stato)) return res.status(400).json({ error: "Stato non valido." });
+  const { stato } = req.body; // approvata | respinta | in_attesa
+  if (!["approvata", "respinta", "in_attesa"].includes(stato)) return res.status(400).json({ error: "Stato non valido." });
   try {
     const { rows } = await pool.query(
       `UPDATE requests SET stato=$1 WHERE id=$2 RETURNING *`, [stato, req.params.id]
@@ -176,16 +179,16 @@ app.post("/api/requests/:id/decide", auth, adminOnly, async (req, res) => {
     const { rows: us } = await pool.query("SELECT name, email FROM users WHERE id=$1", [r.user_id]);
     const u = us[0];
     const tipoLabel = { permesso: "Permesso", ferie: "Ferie", assenza: "Assenza" }[r.tipo];
-    const esito = stato === "approvata" ? "APPROVATA" : "RESPINTA";
-    const subject = `Esito richiesta ${tipoLabel}`;
+    const esito = { approvata: "APPROVATA", respinta: "RESPINTA", in_attesa: "rimessa IN ATTESA" }[stato];
+    const subject = `Aggiornamento richiesta ${tipoLabel}`;
     const body = `Ciao ${u.name}, la tua richiesta di ${tipoLabel.toLowerCase()} del ${String(r.data_inizio).slice(0,10)} è stata ${esito}.`;
 
     await pool.query(
       "INSERT INTO messages (user_id, subject, body) VALUES ($1,$2,$3)",
       [r.user_id, subject, body]
     );
-    // email reale se configurata
-    const emailSent = await sendMail(u.email, subject, body);
+    // email reale se configurata (solo per approvata/respinta, non per il rimettere in attesa)
+    const emailSent = stato === "in_attesa" ? false : await sendMail(u.email, subject, body);
     res.json({ request: r, emailSent });
   } catch (e) {
     console.error(e);
