@@ -522,6 +522,34 @@ app.post("/api/messages/:id/read", auth, async (req, res) => {
   res.json({ ok: true });
 });
 
+// Archivia un singolo messaggio (lo nasconde dalla vista principale, resta recuperabile)
+app.post("/api/messages/:id/archive", auth, async (req, res) => {
+  await pool.query("UPDATE messages SET archived=true, read=true WHERE id=$1 AND user_id=$2", [req.params.id, req.user.id]);
+  res.json({ ok: true });
+});
+
+// Ripristina un messaggio archiviato
+app.post("/api/messages/:id/unarchive", auth, async (req, res) => {
+  await pool.query("UPDATE messages SET archived=false WHERE id=$1 AND user_id=$2", [req.params.id, req.user.id]);
+  res.json({ ok: true });
+});
+
+// Elimina un singolo messaggio
+app.delete("/api/messages/:id", auth, async (req, res) => {
+  await pool.query("DELETE FROM messages WHERE id=$1 AND user_id=$2", [req.params.id, req.user.id]);
+  res.json({ ok: true });
+});
+
+// Azioni in blocco su tutte le comunicazioni GIÀ LETTE dell'utente
+app.post("/api/messages/archive-read", auth, async (req, res) => {
+  const { rowCount } = await pool.query("UPDATE messages SET archived=true WHERE user_id=$1 AND read=true AND archived=false", [req.user.id]);
+  res.json({ ok: true, count: rowCount });
+});
+app.post("/api/messages/delete-read", auth, async (req, res) => {
+  const { rowCount } = await pool.query("DELETE FROM messages WHERE user_id=$1 AND read=true", [req.user.id]);
+  res.json({ ok: true, count: rowCount });
+});
+
 // ============================================================
 //  SERVING DEL FRONTEND (build di Vite in client/dist)
 // ============================================================
