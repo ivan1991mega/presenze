@@ -502,7 +502,7 @@ function AdminApp({ me, onLogout, theme, toggleTheme }) {
   );
 }
 
-function AdminRequests({ pending, allReqs, decide, users, setTab }) {
+function AdminRequests({ pending, allReqs, decide, removeRequest, users, setTab }) {
   const overlaps = useMemo(()=>findOverlaps(allReqs), [allReqs]);
   const approvate = allReqs.filter(r=>r.stato==="approvata").length;
   return (
