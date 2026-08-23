@@ -897,7 +897,12 @@ function Modal({ title, children, onClose }) {
   );
 }
 function Legend() {
-  return <div className="legend">{Object.entries(TIPI).map(([k,v])=>(<span key={k} className="legenditem"><span className="legdot" style={{background:v.color}} />{v.label}</span>))}</div>;
+  return <div className="legend">{Object.entries(TIPI).map(([k,v])=>(
+    <span key={k} className="legenditem">
+      <span className="legtag" style={{background:v.bg,color:v.color}}>{v.short}</span>
+      {v.label}
+    </span>
+  ))}</div>;
 }
 function MonthlySummary({ reqs, logs, detected, cursor, setCursor, showCompare }) {
   const y=cursor.getFullYear(), m=cursor.getMonth();
@@ -1037,8 +1042,8 @@ const CSS = `
 :root[data-theme="dark"] .rolechip.user{ background:#22322b; color:#8ed3b6; }
 /* Le pill di tipo/stato usano colori inline chiari: in dark riduco la loro luminosità sfondo via mix */
 :root[data-theme="dark"] .pill{ filter:brightness(.9) saturate(1.1); }
-html{ background:var(--bg); }
-body{ margin:0; background:var(--bg); color:var(--ink); font-family:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+html{ background:var(--bg); overflow-x:hidden; }
+body{ margin:0; background:var(--bg); color:var(--ink); font-family:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; overflow-x:hidden; max-width:100vw; }
 /* i controlli di default nei browser non ereditano il colore: lo forzo dove non è già impostato */
 h1,h2,h3,h4,h5,p,label,li,td,th{ color:var(--ink); }
 select,input,textarea,option{ color:var(--ink); }
@@ -1067,7 +1072,7 @@ select,input,textarea,option{ color:var(--ink); }
 .badge.solid{ background:var(--accent); }
 .main{ max-width:920px; margin:0 auto; padding:20px 16px 60px; }
 .stack{ display:flex; flex-direction:column; gap:16px; }
-.card{ background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); padding:18px; }
+.card{ background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); padding:18px; max-width:100%; overflow:hidden; }
 h2{ font-size:19px; margin:2px 0; letter-spacing:-.01em; }
 h3{ font-size:16px; margin:0 0 10px; }
 .muted{ color:var(--muted); } .small{ font-size:12.5px; }
@@ -1114,25 +1119,26 @@ h3{ font-size:16px; margin:0 0 10px; }
 .cmp.warn{ background:#f7ecd9; color:#b3701c; }
 .monthnav{ display:flex; align-items:center; justify-content:center; gap:16px; margin-bottom:14px; }
 .monthlabel{ font-weight:700; font-size:16px; min-width:150px; text-align:center; }
-.calendar{ border:1px solid var(--line); border-radius:12px; overflow:hidden; }
-.calhead{ display:grid; grid-template-columns:repeat(7,1fr); background:var(--bg); }
-.calheadcell{ padding:8px 4px; text-align:center; font-size:12px; font-weight:700; color:var(--muted); }
-.calbody{ display:grid; grid-template-columns:repeat(7,1fr); }
-.calcell{ min-height:76px; border-top:1px solid var(--line); border-left:1px solid var(--line); padding:5px; position:relative; }
+.calendar{ border:1px solid var(--line); border-radius:12px; overflow:hidden; width:100%; max-width:100%; }
+.calhead{ display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); background:var(--bg); }
+.calheadcell{ padding:8px 2px; text-align:center; font-size:12px; font-weight:700; color:var(--muted); min-width:0; overflow:hidden; }
+.calbody{ display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); }
+.calcell{ min-height:76px; min-width:0; border-top:1px solid var(--line); border-left:1px solid var(--line); padding:5px; position:relative; overflow:hidden; }
 .calcell:nth-child(7n+1){ border-left:0; }
 .calcell.empty{ background:var(--panel2); }
 .calcell.today{ background:var(--todaybg); }
 .calnum{ font-size:12px; font-weight:700; color:var(--muted); }
 .calcell.today .calnum{ color:var(--accent); }
 .daytags{ display:flex; flex-direction:column; gap:3px; margin-top:3px; }
-.daytag{ font-size:10.5px; font-weight:700; padding:2px 5px; border-radius:5px; text-align:center; }
+.daytag{ font-size:10.5px; font-weight:700; padding:2px 4px; border-radius:5px; text-align:center; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .teamday{ display:flex; flex-direction:column; gap:2px; margin-top:3px; }
 .teamday.many{ outline:2px solid #e6b566; outline-offset:-4px; border-radius:6px; }
-.teamtag{ font-size:9.5px; font-weight:700; padding:2px 4px; border-radius:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.teamtag{ font-size:9.5px; font-weight:700; padding:2px 3px; border-radius:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .teamtag.more{ background:var(--line); color:var(--muted); }
-.legend{ display:flex; gap:16px; flex-wrap:wrap; margin-top:12px; }
+.legend{ display:flex; gap:14px; flex-wrap:wrap; margin-top:12px; }
 .legenditem{ display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--muted); font-weight:600; }
 .legdot{ width:10px; height:10px; border-radius:3px; }
+.legtag{ display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px; border-radius:5px; font-size:11px; font-weight:800; }
 .stats{ display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-top:4px; }
 .stats5{ grid-template-columns:repeat(5,1fr); }
 .stat{ background:var(--bg); border-radius:12px; padding:16px 12px; text-align:center; }
