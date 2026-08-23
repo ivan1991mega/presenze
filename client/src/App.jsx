@@ -464,16 +464,28 @@ function AdminApp({ me, onLogout, theme, toggleTheme }) {
   const pending = reqs.filter(r=>r.stato==="in_attesa");
 
   const decide = async (r, stato) => {
+    // Apro SUBITO una nuova scheda (collegata al clic) così il browser non la blocca
+    // né la apre nella stessa finestra. La riempio dopo la risposta del server.
+    let mailTab = null;
+    if (stato === "approvata") {
+      mailTab = window.open("about:blank", "_blank");
+    }
     try {
       const res = await api.post(`/api/requests/${r.id}/decide`, { stato });
       reload();
       if (stato==="approvata" && !res.emailSent) {
-        // apri Gmail web come fallback per l'admin (funziona senza client di posta installato)
         const subject = `Esito richiesta ${TIPI[r.tipo].label}`;
         const body = `Ciao ${r.user_name}, la tua richiesta di ${TIPI[r.tipo].label.toLowerCase()} del ${fmtDate(r.data_inizio)} è stata APPROVATA.`;
-        window.open(buildGmail(r.user_email, subject, body), "_blank");
+        const url = buildGmail(r.user_email, subject, body);
+        if (mailTab) mailTab.location.href = url;   // riempio la scheda già aperta
+        else window.open(url, "_blank", "noopener");  // fallback
+      } else if (mailTab) {
+        mailTab.close(); // email già inviata dal server: chiudo la scheda vuota
       }
-    } catch(e){ alert(e.message); }
+    } catch(e){
+      if (mailTab) mailTab.close();
+      alert(e.message);
+    }
   };
 
   const removeRequest = async (r) => {
