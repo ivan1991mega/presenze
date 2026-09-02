@@ -49,6 +49,18 @@ function canEdit(r) {
   return r.stato === "in_attesa" && di >= today;
 }
 
+// "Oggi" secondo il fuso orario italiano (gestisce anche l'ora legale), in formato YYYY-MM-DD.
+function todayItaly() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Rome", year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(new Date()); // en-CA produce direttamente "YYYY-MM-DD"
+}
+// Vero se la data passata (stringa o Date) è la giornata odierna italiana.
+function isTodayItaly(v) {
+  const d = (v instanceof Date) ? v.toISOString().slice(0,10) : String(v).slice(0,10);
+  return d === todayItaly();
+}
+
 // ============================================================
 //  AUTENTICAZIONE
 // ============================================================
@@ -322,6 +334,10 @@ app.get("/api/worklogs", auth, async (req, res) => {
 
 app.post("/api/worklogs", auth, async (req, res) => {
   const { data, inizio, fine, pausa, ore, straordinari } = req.body;
+  // L'utente può registrare ore solo per la giornata odierna (fuso Italia). L'admin senza vincoli.
+  if (req.user.role !== "admin" && !isTodayItaly(data)) {
+    return res.status(403).json({ error: "Puoi registrare le ore solo per la giornata di oggi. Le giornate passate può modificarle solo l'amministratore." });
+  }
   try {
     const { rows } = await pool.query(
       `INSERT INTO worklogs (user_id, data, inizio, fine, pausa, ore, straordinari)
@@ -345,6 +361,14 @@ app.put("/api/worklogs/:id", auth, async (req, res) => {
     if (!w) return res.status(404).json({ error: "Registrazione non trovata." });
     if (w.user_id !== req.user.id && req.user.role !== "admin")
       return res.status(403).json({ error: "Non puoi modificare questa registrazione." });
+    // L'utente può modificare solo le registrazioni della giornata odierna; l'admin sempre.
+    if (req.user.role !== "admin" && !isTodayItaly(w.data)) {
+      return res.status(403).json({ error: "Le ore dei giorni passati sono bloccate. Solo l'amministratore può modificarle." });
+    }
+    // Impedisce anche di spostare una registrazione odierna a una data passata.
+    if (req.user.role !== "admin" && !isTodayItaly(data)) {
+      return res.status(403).json({ error: "Puoi impostare solo la data di oggi." });
+    }
     const { rows: upd } = await pool.query(
       `UPDATE worklogs SET data=$1, inizio=$2, fine=$3, pausa=$4, ore=$5, straordinari=$6
        WHERE id=$7 RETURNING *`,
@@ -363,6 +387,10 @@ app.delete("/api/worklogs/:id", auth, async (req, res) => {
     if (!rows[0]) return res.status(404).json({ error: "Non trovato." });
     if (rows[0].user_id !== req.user.id && req.user.role !== "admin")
       return res.status(403).json({ error: "Non consentito." });
+    // L'utente può eliminare solo le registrazioni odierne; l'admin sempre.
+    if (req.user.role !== "admin" && !isTodayItaly(rows[0].data)) {
+      return res.status(403).json({ error: "Le ore dei giorni passati sono bloccate. Solo l'amministratore può eliminarle." });
+    }
     await pool.query("DELETE FROM worklogs WHERE id=$1", [req.params.id]);
     res.json({ ok: true });
   } catch (e) {
