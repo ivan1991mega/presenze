@@ -369,7 +369,8 @@ function PunchClock({ reload }) {
 
 
 function UserWorklogs({ logs, detected, reload }) {
-  const empty = { id:null, data:todayISO(), inizio:"09:00", fine:"18:00", pausa:"60", straordinari:"0" };
+  const oggi = todayISO();
+  const empty = { id:null, data:oggi, inizio:"09:00", fine:"18:00", pausa:"60", straordinari:"0" };
   const [f, setF] = useState(empty);
   const [err, setErr] = useState("");
 
@@ -388,14 +389,14 @@ function UserWorklogs({ logs, detected, reload }) {
     const straordAuto = Math.max(0, oreLorde - 8);
     const straord = straordManuale > 0 ? straordManuale : round2(straordAuto);
     const oreDaSalvare = straordManuale > 0 ? round2(oreLorde - straordManuale) : round2(oreNormali);
-    const payload = { data:f.data, inizio:f.inizio, fine:f.fine, pausa:parseInt(f.pausa||"0",10), ore:oreDaSalvare, straordinari:straord };
+    const payload = { data:oggi, inizio:f.inizio, fine:f.fine, pausa:parseInt(f.pausa||"0",10), ore:oreDaSalvare, straordinari:straord };
     try {
       if (editing) await api.put(`/api/worklogs/${f.id}`, payload);
       else await api.post("/api/worklogs", payload);
       cancel(); reload();
     } catch(e){ setErr(e.message); }
   };
-  const remove = async (l) => { if(!confirm("Eliminare questa registrazione?"))return; await api.del(`/api/worklogs/${l.id}`); reload(); };
+  const remove = async (l) => { if(!confirm("Eliminare questa registrazione?"))return; try { await api.del(`/api/worklogs/${l.id}`); reload(); } catch(e){ alert(e.message); } };
 
   return (
     <div className="stack">
@@ -403,7 +404,7 @@ function UserWorklogs({ logs, detected, reload }) {
       <div className="card formcard">
         {editing && <div className="editbanner">Stai modificando la registrazione del {fmtDate(f.data)}</div>}
         <div className="grid5">
-          <label className="field"><span>Data</span><input type="date" value={f.data} onChange={e=>setF({...f,data:e.target.value})} /></label>
+          <label className="field"><span>Data (oggi)</span><input type="date" value={oggi} disabled title="Puoi registrare solo la giornata di oggi" /></label>
           <label className="field"><span>Entrata</span><input type="time" value={f.inizio} onChange={e=>setF({...f,inizio:e.target.value})} /></label>
           <label className="field"><span>Uscita</span><input type="time" value={f.fine} onChange={e=>setF({...f,fine:e.target.value})} /></label>
           <label className="field"><span>Pausa (min)</span><input type="number" min="0" step="15" value={f.pausa} onChange={e=>setF({...f,pausa:e.target.value})} /></label>
@@ -421,6 +422,7 @@ function UserWorklogs({ logs, detected, reload }) {
           const det = detected.find(x=>iso(x.data)===iso(l.data));
           const diff = det ? round2(Number(l.ore)-Number(det.ore)) : null;
           const straord = Number(l.straordinari||0);
+          const modificabile = iso(l.data) === oggi; // solo oggi è modificabile dall'utente
           return (
             <div key={l.id} className="logrow">
               <div className="logdate">{fmtDate(l.data)}</div>
@@ -428,14 +430,18 @@ function UserWorklogs({ logs, detected, reload }) {
               <div className="loghours">{round2(Number(l.ore))}h {straord>0 && <span className="straordtag">+{straord}h str.</span>}</div>
               <div className="logcompare">{det ? <span className={diff===0?"cmp ok":"cmp warn"}>Rilevate {round2(Number(det.ore))}h {diff!==0&&`(Δ ${diff>0?"+":""}${diff}h)`}</span> : <span className="muted small">nessun rilevamento</span>}</div>
               <div className="logactions">
-                <button className="btn tiny" onClick={()=>startEdit(l)}>Modifica</button>
-                <button className="btn tiny danger" onClick={()=>remove(l)}>Elimina</button>
+                {modificabile ? (
+                  <>
+                    <button className="btn tiny" onClick={()=>startEdit(l)}>Modifica</button>
+                    <button className="btn tiny danger" onClick={()=>remove(l)}>Elimina</button>
+                  </>
+                ) : <span className="muted small locked">🔒 Bloccata</span>}
               </div>
             </div>
           );
         })}
       </div>
-      <p className="muted small">Le ore non richiedono approvazione: se noti un'incongruenza puoi correggerle con “Modifica”. Le ore “rilevate” le inserisce l'amministratore.</p>
+      <p className="muted small">Puoi inserire e modificare le ore solo per la giornata di oggi. Dalla mezzanotte le ore del giorno si bloccano: dopo di che solo l'amministratore può modificarle.</p>
     </div>
   );
 }
@@ -1092,6 +1098,7 @@ h3{ font-size:16px; margin:0 0 10px; }
 .rowend{ display:flex; justify-content:flex-end; gap:8px; margin-top:12px; }
 .field{ display:flex; flex-direction:column; gap:5px; font-size:13px; font-weight:600; color:var(--muted); margin-bottom:12px; }
 .field input,.field select,.field textarea{ border:1px solid var(--line); border-radius:10px; padding:10px 12px; font-size:14px; font-family:inherit; color:var(--ink); background:var(--panel); font-weight:500; }
+.field input:disabled,.field select:disabled{ opacity:.6; cursor:not-allowed; background:var(--panel2); }
 .field input:focus,.field select:focus,.field textarea:focus{ outline:2px solid var(--accent); border-color:transparent; }
 .grid2{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
 .grid3{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; }
