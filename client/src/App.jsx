@@ -377,6 +377,9 @@ function UserWorklogs({ logs, detected, reload }) {
   const editing = f.id !== null;
   const startEdit = (l) => { setErr(""); setF({ id:l.id, data:iso(l.data), inizio:l.inizio, fine:l.fine, pausa:String(l.pausa), straordinari:String(l.straordinari||0) }); };
   const cancel = () => { setErr(""); setF(empty); };
+  
+  // Popola il form con 7,5 ore di default (09:00-17:30, pausa 60 min)
+  const quickRegister75 = () => { setErr(""); setF({ id:null, data:oggi, inizio:"09:00", fine:"17:30", pausa:"60", straordinari:"0" }); };
 
   const save = async () => {
     setErr("");
@@ -400,7 +403,7 @@ function UserWorklogs({ logs, detected, reload }) {
 
   return (
     <div className="stack">
-      <h2>Ore lavorate</h2>
+      <div className="rowbetween"><h2>Ore lavorate</h2><button className="btn primary" onClick={quickRegister75}>⚡ Registra 7,5 ore</button></div>
       <div className="card formcard">
         {editing && <div className="editbanner">Stai modificando la registrazione del {fmtDate(f.data)}</div>}
         <div className="grid5">
