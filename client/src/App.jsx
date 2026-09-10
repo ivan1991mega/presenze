@@ -129,7 +129,7 @@ function Auth({ onLogin, theme, toggleTheme }) {
 //  APP UTENTE
 // ============================================================
 function UserApp({ me, onLogout, theme, toggleTheme }) {
-  const [tab, setTab] = useState("calendario");
+  const [tab, setTab] = useState("ore");
   const [cursor, setCursor] = useState(new Date());
   const [reqs, setReqs] = useState([]);
   const [logs, setLogs] = useState([]);
@@ -154,18 +154,18 @@ function UserApp({ me, onLogout, theme, toggleTheme }) {
     <div className="wrap">
       <Header me={me} onLogout={onLogout} right={<span className="rolechip user">Utente</span>} theme={theme} toggleTheme={toggleTheme} />
       <nav className="nav">
-        <button className={tab==="calendario"?"navbtn on":"navbtn"} onClick={()=>setTab("calendario")}>Calendario</button>
-        <button className={tab==="richieste"?"navbtn on":"navbtn"} onClick={()=>setTab("richieste")}>Richieste</button>
         <button className={tab==="ore"?"navbtn on":"navbtn"} onClick={()=>setTab("ore")}>Ore lavorate</button>
         <button className={tab==="riepilogo"?"navbtn on":"navbtn"} onClick={()=>setTab("riepilogo")}>Riepilogo</button>
+        <button className={tab==="calendario"?"navbtn on":"navbtn"} onClick={()=>setTab("calendario")}>Calendario</button>
+        <button className={tab==="richieste"?"navbtn on":"navbtn"} onClick={()=>setTab("richieste")}>Richieste</button>
         <button className={tab==="messaggi"?"navbtn on":"navbtn"} onClick={()=>setTab("messaggi")}>
           Comunicazioni{unread>0 && <span className="badge">{unread}</span>}</button>
       </nav>
       <main className="main">
-        {tab==="calendario" && <UserCalendar cursor={cursor} setCursor={setCursor} reqs={reqs} logs={logs} onOpenRequest={openRequestFromCalendar} />}
-        {tab==="richieste" && <UserRequests me={me} reqs={reqs} reload={reload} openReq={openReq} clearOpenReq={()=>setOpenReq(null)} />}
         {tab==="ore" && <><PunchClock reload={reload} /><UserWorklogs logs={logs} detected={detected} reload={reload} /></>}
         {tab==="riepilogo" && <MonthlySummary reqs={reqs} logs={logs} detected={detected} cursor={cursor} setCursor={setCursor} showCompare />}
+        {tab==="calendario" && <UserCalendar cursor={cursor} setCursor={setCursor} reqs={reqs} logs={logs} onOpenRequest={openRequestFromCalendar} />}
+        {tab==="richieste" && <UserRequests me={me} reqs={reqs} reload={reload} openReq={openReq} clearOpenReq={()=>setOpenReq(null)} />}
         {tab==="messaggi" && <Messages msgs={msgs} me={me} reload={reload} />}
       </main>
       <style>{CSS}</style>
@@ -403,7 +403,7 @@ function UserWorklogs({ logs, detected, reload }) {
 
   return (
     <div className="stack">
-      <div className="rowbetween"><h2>Ore lavorate</h2><button className="btn primary" onClick={quickRegister75}>⚡ Registra 7,5 ore</button></div>
+      <div className="rowbetween quickregbanner"><h2>Ore lavorate</h2><button className="btn primary biglarge quickregister75" onClick={quickRegister75}>⚡ Registra 7,5 ore</button></div>
       <div className="card formcard">
         {editing && <div className="editbanner">Stai modificando la registrazione del {fmtDate(f.data)}</div>}
         <div className="grid5">
@@ -1061,6 +1061,9 @@ const CSS = `
 :root[data-theme="dark"] .btn.warn{ background:#3a3020; border-color:#4d4028; color:#e8c58a; }
 :root[data-theme="dark"] .rolechip.admin{ background:#312a44; color:#c3b0e6; }
 :root[data-theme="dark"] .rolechip.user{ background:#22322b; color:#8ed3b6; }
+:root[data-theme="dark"] .quickregbanner{ background:var(--panel2); }
+:root[data-theme="dark"] .quickregister75{ box-shadow:0 2px 8px rgba(0,0,0,.3); }
+:root[data-theme="dark"] .quickregister75:hover:not(:disabled){ box-shadow:0 4px 14px rgba(0,0,0,.4); }
 /* Le pill di tipo/stato usano colori inline chiari: in dark riduco la loro luminosità sfondo via mix */
 :root[data-theme="dark"] .pill{ filter:brightness(.9) saturate(1.1); }
 html{ background:var(--bg); overflow-x:hidden; }
@@ -1281,4 +1284,49 @@ h3{ font-size:16px; margin:0 0 10px; }
 .modal{ background:var(--panel); border-radius:16px; box-shadow:0 12px 40px rgba(0,0,0,.25); padding:20px; width:100%; max-width:520px; max-height:80vh; overflow:auto; }
 .modalhead{ display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; }
 .modalhead h3{ margin:0; }
+/* === Stili per il bottone Registra 7,5 ore === */
+.quickregbanner{ background:var(--bg); padding:16px; border-radius:12px; margin-bottom:8px; display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.quickregister75{ padding:14px 22px !important; font-size:16px !important; letter-spacing:.01em; box-shadow:0 2px 8px rgba(0,0,0,.12); }
+.quickregister75:hover:not(:disabled){ transform:translateY(-2px); box-shadow:0 4px 14px rgba(0,0,0,.18); }
+.biglarge{ padding:14px 22px !important; font-size:16px !important; }
+/* === Responsive tabelle e righe === */
+.logrow .logtimes, .logrow .logcompare, .logrow .logactions { font-size:13px; }
+.reqrow .pill { font-size:11px; padding:4px 8px; }
+.table-scroll { overflow-x:auto; }
+/* ===== Tablet (1024px) ===== */
+@media (max-width:1024px){
+  .quickregbanner{ flex-direction:column; align-items:stretch; }
+  .quickregbanner .quickregister75 { width:100%; }
+  .logrow, .reqrow { flex-wrap:wrap; }
+  .logcompare { width:100%; margin-left:0 !important; margin-top:6px; }
+  .reqactions { width:100%; margin-left:0 !important; }
+}
+/* ===== Mobile migliorato (fino a 640px) ===== */
+@media (max-width:640px){
+  .quickregbanner{ flex-direction:column; gap:12px; padding:12px; }
+  .quickregister75 { width:100%; padding:12px 16px !important; font-size:15px !important; }
+  .logrow { gap:8px; flex-direction:column; }
+  .logdate { font-size:14px; font-weight:700; }
+  .logtimes { font-size:12px; color:var(--muted); }
+  .loghours { font-size:13px; font-weight:600; }
+  .logcompare { width:100%; margin:0; font-size:12px; }
+  .logactions { width:100%; gap:6px; }
+  .logactions .btn { flex:1; font-size:12px; }
+  .reqrow { gap:8px; }
+  .reqmain { width:100%; min-width:auto; }
+  .reqwho { width:100%; min-width:auto; }
+  .pill { font-size:11px; padding:3px 8px; }
+  .reqactions { width:100%; }
+  .reqactions .btn { flex:1; }
+  .list { gap:6px; }
+  .card { padding:14px; }
+}
+/* ===== Mobile piccolo (fino a 400px) ===== */
+@media (max-width:400px){
+  .quickregbanner h2 { font-size:16px; }
+  .quickregister75 { padding:11px 14px !important; font-size:14px !important; }
+  .logrow .btn { padding:5px 9px; font-size:11px; }
+  .reqrow .btn { padding:5px 9px; font-size:11px; }
+}
+
 `;
